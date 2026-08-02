@@ -1,4 +1,6 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
   "installCommand": "cd musicjam-web && npm ci",
   "buildCommand": "cd musicjam-web && npm run build",
   "devCommand": "cd musicjam-web && npm run dev"
