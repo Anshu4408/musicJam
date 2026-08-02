@@ -181,23 +181,54 @@ export function useAudioEngine() {
     setIsLoading(true);
 
     try {
-      // Capture system/tab audio
-      const displayStream = await (navigator.mediaDevices as any).getDisplayMedia({
-        video: true,
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          sampleRate: 48000,
-        },
-      });
+      // Strategy 1: getDisplayMedia with audio:true
+      // Using audio:true (not a constraints object) is the most compatible approach.
+      // Constraints objects can cause browsers to silently drop the audio track.
+      let displayStream: MediaStream | null = null;
 
-      displayStream.getVideoTracks().forEach((t: MediaStreamTrack) => t.stop());
-      const audioTracks = displayStream.getAudioTracks();
+      try {
+        displayStream = await (navigator.mediaDevices as any).getDisplayMedia({
+          video: true,   // required — Chrome won't show the dialog without video
+          audio: true,   // simple boolean = most compatible
+          preferCurrentTab: false,
+        });
+      } catch (e: any) {
+        // User cancelled or browser doesn't support it
+        if (e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError') throw e;
+        throw e;
+      }
 
+      // Stop the video track immediately (we only want audio)
+      displayStream!.getVideoTracks().forEach((t: MediaStreamTrack) => t.stop());
+
+      let audioTracks = displayStream!.getAudioTracks();
+
+      // If no audio tracks — user didn't tick "Share tab audio" or OS doesn't support it
       if (audioTracks.length === 0) {
-        throw new Error(
-          'No audio track found. Tick "Share tab audio" or "Share system audio" in the dialog.'
-        );
+        displayStream!.getTracks().forEach((t: MediaStreamTrack) => t.stop());
+
+        // Detect OS to give the right instructions
+        const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
+        const isWindows = /Win/.test(navigator.userAgent);
+
+        const macMsg =
+          '🍎 macOS: Chrome cannot capture system audio from "Entire Screen".\n\n' +
+          'Fix: In the share dialog, switch to the "Tab" tab and select the tab\n' +
+          'playing music (e.g. Spotify Web, YouTube). Make sure\n' +
+          '"Share tab audio" checkbox is ticked ✅ before clicking Share.';
+
+        const winMsg =
+          '🪟 Windows: Make sure you ticked the "Share system audio" checkbox\n' +
+          'at the bottom of the screen share dialog before clicking Share.\n\n' +
+          'If sharing a Tab, tick "Share tab audio" instead.';
+
+        const genericMsg =
+          'No audio was captured. In the browser share dialog:\n' +
+          '• Sharing a Tab → tick "Share tab audio" ✅\n' +
+          '• Sharing Screen → tick "Share system audio" ✅ (Windows only)\n' +
+          '• On macOS: share a specific Tab, not the Entire Screen.';
+
+        throw new Error(isMac ? macMsg : isWindows ? winMsg : genericMsg);
       }
 
       const audioStream = new MediaStream(audioTracks);

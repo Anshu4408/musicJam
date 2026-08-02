@@ -10,7 +10,7 @@ export default function ErrorBanner({ message }: ErrorBannerProps) {
   return (
     <div className="error-banner" role="alert">
       <span className="error-banner__icon">⚠️</span>
-      <span className="error-banner__text">{message}</span>
+      <span className="error-banner__text" style={{ whiteSpace: 'pre-wrap' }}>{message}</span>
     </div>
   );
 }

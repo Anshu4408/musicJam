@@ -150,14 +150,25 @@ export default function SelectionView({
       <div className="tip-card">
         <span className="tip-card__icon">💡</span>
         <div>
-          <p className="tip-card__title">How to share Spotify / system audio</p>
-          <p className="tip-card__body">
-            Click <strong>Start Host</strong>, then in the browser dialog:
-          </p>
+          <p className="tip-card__title">How to share audio from Spotify / YouTube</p>
           <ol className="tip-card__steps">
-            <li>Pick a <strong>Tab</strong> (e.g. Spotify Web) and tick <strong>"Share tab audio"</strong></li>
-            <li>Or pick <strong>Entire Screen</strong> and tick <strong>"Share system audio"</strong> (Windows/macOS)</li>
+            <li>
+              <strong>Open</strong> Spotify Web Player or YouTube in another browser tab
+            </li>
+            <li>
+              Click <strong>Start Host</strong> → a screen share dialog appears
+            </li>
+            <li>
+              Switch to the <strong>"Tab"</strong> section → pick the Spotify/YouTube tab
+            </li>
+            <li>
+              Tick <strong>"Share tab audio"</strong> ✅ → click <strong>Share</strong>
+            </li>
           </ol>
+          <p className="tip-card__os-note">
+            <strong>⚠️ macOS:</strong> "Entire Screen" does <em>not</em> capture audio — always pick a <strong>Tab</strong>.<br />
+            <strong>🪟 Windows:</strong> "Entire Screen" works if you tick "Share system audio".
+          </p>
         </div>
       </div>
     </section>
