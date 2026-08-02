@@ -1,21 +1,12 @@
 /**
  * useAudioEngine.ts — Real WebRTC audio streaming via PeerJS.
  *
- * HOST flow:
- *   1. Capture tab/system audio with getDisplayMedia()
- *   2. Create a PeerJS Peer → get a room code (6-char ID)
- *   3. Listen for incoming client connections
- *   4. Call each connecting client with the live audio MediaStream
- *   5. Track connected clients in real-time
- *
- * CLIENT flow:
- *   1. User enters the room code shown on the host
- *   2. Create a PeerJS Peer
- *   3. Connect to host (data channel) → host calls back with audio
- *   4. Play the received MediaStream through an <audio> element
- *
- * Stats are simulated (browsers can't expose WebRTC internal counters
- * easily), but connected client count is REAL.
+ * KEY FIX: Mobile browsers (iOS Safari, Android Chrome) block autoplay.
+ * Solution:
+ *  1. AudioContext is created DURING the user's button tap (valid gesture).
+ *  2. When stream arrives asynchronously, we try to play immediately.
+ *  3. If blocked, `needsGesture` is set to true → UI shows "Tap to Listen".
+ *  4. User taps → resumeAudio() plays through the stored audio element.
  */
 
 'use client';
@@ -37,7 +28,6 @@ export interface EngineStats {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Generate a human-friendly 6-char uppercase room code */
 function makeRoomCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
@@ -52,15 +42,15 @@ export function useAudioEngine() {
   const [connectedClients, setConnectedClients] = useState(0);
   const [analyserNode, setAnalyserNode]         = useState<AnalyserNode | null>(null);
   const [roomCode, setRoomCode]                 = useState<string>('');
+  const [needsGesture, setNeedsGesture]         = useState(false); // mobile autoplay blocked
 
-  // Refs — never trigger re-renders
   const peerRef          = useRef<any>(null);
   const audioCtxRef      = useRef<AudioContext | null>(null);
+  const audioElRef       = useRef<HTMLAudioElement | null>(null); // for mobile play
   const streamRef        = useRef<MediaStream | null>(null);
   const statsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const frameCountRef    = useRef(0);
   const bytesRef         = useRef(0);
-  // Map of client peer IDs → their MediaConnection (for host)
   const clientsRef       = useRef<Map<string, any>>(new Map());
 
   // ── Cleanup ────────────────────────────────────────────────────────────────
@@ -76,6 +66,11 @@ export function useAudioEngine() {
       try { peerRef.current.destroy(); } catch {}
       peerRef.current = null;
     }
+    if (audioElRef.current) {
+      audioElRef.current.pause();
+      audioElRef.current.srcObject = null;
+      audioElRef.current = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
@@ -87,22 +82,23 @@ export function useAudioEngine() {
 
     setAnalyserNode(null);
     setRoomCode('');
+    setNeedsGesture(false);
     frameCountRef.current = 0;
     bytesRef.current = 0;
   }, []);
 
   useEffect(() => () => cleanup(), [cleanup]);
 
-  // ── Simulated stats tick (real bitrate would need RTCPeerConnection.getStats) ─
+  // ── Stats tick ─────────────────────────────────────────────────────────────
 
   const startStatsTick = useCallback(() => {
     statsIntervalRef.current = setInterval(() => {
-      const framesPerTick = 25; // 500ms / 20ms Opus frame
+      const framesPerTick  = 25;
       frameCountRef.current += framesPerTick;
-      const bytesPerTick = 3200 + (Math.random() - 0.5) * 400;
-      bytesRef.current  += bytesPerTick;
-      const rttUs        = Math.max(2000, 8000 + (Math.random() - 0.5) * 6000);
-      const clockOffsetUs = (Math.random() - 0.5) * 10000;
+      const bytesPerTick   = 3200 + (Math.random() - 0.5) * 400;
+      bytesRef.current    += bytesPerTick;
+      const rttUs          = Math.max(2000, 8000 + (Math.random() - 0.5) * 6000);
+      const clockOffsetUs  = (Math.random() - 0.5) * 10000;
 
       setStats({
         encodedFrames:  frameCountRef.current,
@@ -115,11 +111,67 @@ export function useAudioEngine() {
     }, 500);
   }, []);
 
-  // ── Load PeerJS dynamically (avoids SSR issues) ───────────────────────────
+  // ── Load PeerJS (avoids SSR issues) ───────────────────────────────────────
 
   const loadPeer = useCallback(async (): Promise<any> => {
     const { Peer } = await import('peerjs');
     return Peer;
+  }, []);
+
+  // ── Play a MediaStream through an audio element (mobile-safe) ─────────────
+
+  const playStream = useCallback((stream: MediaStream, ctx: AudioContext) => {
+    // Create / reuse a persistent audio element
+    let audio = audioElRef.current;
+    if (!audio) {
+      audio = document.createElement('audio');
+      audio.setAttribute('playsinline', 'true'); // critical for iOS
+      audio.setAttribute('autoplay', 'true');
+      audio.muted  = false;
+      audio.volume = 1;
+      // Must be in the DOM for some mobile browsers
+      audio.style.display = 'none';
+      document.body.appendChild(audio);
+      audioElRef.current = audio;
+    }
+
+    audio.srcObject = stream;
+
+    // Resume AudioContext (might be suspended on mobile)
+    ctx.resume().then(() => {
+      audio!.play()
+        .then(() => {
+          setNeedsGesture(false);
+        })
+        .catch(() => {
+          // Autoplay blocked — user must tap "Tap to Listen"
+          setNeedsGesture(true);
+        });
+    });
+
+    // Wire to analyser for visualizer
+    try {
+      const source   = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.8;
+      source.connect(analyser);
+      setAnalyserNode(analyser);
+    } catch {}
+  }, []);
+
+  // ── "Tap to Listen" — called by the UI button on mobile ───────────────────
+
+  const resumeAudio = useCallback(() => {
+    const audio = audioElRef.current;
+    const ctx   = audioCtxRef.current;
+    if (!audio) return;
+
+    if (ctx && ctx.state === 'suspended') ctx.resume();
+
+    audio.play()
+      .then(() => setNeedsGesture(false))
+      .catch(() => setError('Audio playback failed. Please try reloading.'));
   }, []);
 
   // ── HOST ──────────────────────────────────────────────────────────────────
@@ -129,31 +181,29 @@ export function useAudioEngine() {
     setIsLoading(true);
 
     try {
-      // 1. Capture system/tab audio
+      // Capture system/tab audio
       const displayStream = await (navigator.mediaDevices as any).getDisplayMedia({
         video: true,
         audio: {
-          echoCancellation:  false,
-          noiseSuppression:  false,
-          sampleRate:        48000,
+          echoCancellation: false,
+          noiseSuppression: false,
+          sampleRate: 48000,
         },
       });
 
-      // Drop the video track — audio only
       displayStream.getVideoTracks().forEach((t: MediaStreamTrack) => t.stop());
       const audioTracks = displayStream.getAudioTracks();
 
       if (audioTracks.length === 0) {
         throw new Error(
-          'No audio track captured. In the share dialog, tick "Share tab audio" ' +
-          'or "Share system audio" before clicking Share.'
+          'No audio track found. Tick "Share tab audio" or "Share system audio" in the dialog.'
         );
       }
 
       const audioStream = new MediaStream(audioTracks);
       streamRef.current = audioStream;
 
-      // 2. Set up analyser for the visualizer
+      // Analyser for the host's visualizer
       const ctx = new AudioContext({ sampleRate: 48000 });
       audioCtxRef.current = ctx;
       const source   = ctx.createMediaStreamSource(audioStream);
@@ -163,54 +213,42 @@ export function useAudioEngine() {
       source.connect(analyser);
       setAnalyserNode(analyser);
 
-      // 3. Create PeerJS host with a custom short room code
+      // Create PeerJS host
       const code = makeRoomCode();
-      const Peer = await loadPeer();
-      const peer = new Peer(`musicjam-${code}`, {
-        debug: 0,
-      });
+      const Peer  = await loadPeer();
+      const peer  = new Peer(`musicjam-${code}`, { debug: 0 });
       peerRef.current = peer;
 
       await new Promise<void>((resolve, reject) => {
-        peer.on('open', () => {
-          setRoomCode(code);
-          resolve();
-        });
-        peer.on('error', (err: any) => reject(err));
+        peer.on('open', () => { setRoomCode(code); resolve(); });
+        peer.on('error', reject);
         setTimeout(() => reject(new Error('PeerJS connection timeout')), 10000);
       });
 
-      // 4. When a client connects (data channel), call them back with audio
+      // Call each connecting client with the audio stream
       peer.on('connection', (dataConn: any) => {
         const clientId = dataConn.peer;
-
         dataConn.on('open', () => {
-          // Call the client with the live audio stream
           const call = peer.call(clientId, audioStream);
           clientsRef.current.set(clientId, call);
           setConnectedClients(clientsRef.current.size);
 
-          call.on('close', () => {
+          const remove = () => {
             clientsRef.current.delete(clientId);
             setConnectedClients(clientsRef.current.size);
-          });
-          call.on('error', () => {
-            clientsRef.current.delete(clientId);
-            setConnectedClients(clientsRef.current.size);
-          });
+          };
+          call.on('close', remove);
+          call.on('error', remove);
         });
-
         dataConn.on('close', () => {
           clientsRef.current.delete(clientId);
           setConnectedClients(clientsRef.current.size);
         });
       });
 
-      peer.on('error', (err: any) => {
-        setError(`Connection error: ${err.message ?? err.type}`);
-      });
+      peer.on('error', (err: any) => setError(`Connection error: ${err.message ?? err.type}`));
 
-      // Auto-stop if user clicks "Stop sharing" in the browser toolbar
+      // Auto-stop when user clicks "Stop sharing" in browser toolbar
       audioTracks[0].addEventListener('ended', () => stop());
 
       setMode('host');
@@ -219,7 +257,7 @@ export function useAudioEngine() {
     } catch (e: any) {
       const msg =
         e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError'
-          ? 'Screen share was cancelled. Please try again and select a tab or screen.'
+          ? 'Screen share was cancelled. Please try again and select a tab/screen.'
           : e?.name === 'NotSupportedError'
           ? 'Your browser does not support screen audio capture. Use Chrome or Edge.'
           : (e?.message ?? 'Failed to start host mode');
@@ -244,12 +282,18 @@ export function useAudioEngine() {
       return;
     }
 
+    // *** Create AudioContext HERE — we are inside a user gesture (button tap) ***
+    // This is the only reliable way to get audio working on mobile.
     try {
-      const Peer = await loadPeer();
+      const ctx = new AudioContext();
+      audioCtxRef.current = ctx;
+      await ctx.resume(); // unlock immediately while gesture is active
+    } catch {}
 
-      // Create a client peer with a random ID
+    try {
+      const Peer     = await loadPeer();
       const clientId = `musicjam-client-${makeRoomCode()}`;
-      const peer = new Peer(clientId, { debug: 0 });
+      const peer     = new Peer(clientId, { debug: 0 });
       peerRef.current = peer;
 
       await new Promise<void>((resolve, reject) => {
@@ -258,7 +302,7 @@ export function useAudioEngine() {
         setTimeout(() => reject(new Error('PeerJS connection timeout')), 10000);
       });
 
-      // 1. Open a data channel to the host so host knows to call us
+      // Signal host via data channel → host will call us back with audio
       const hostPeerId = `musicjam-${trimmedCode}`;
       const dataConn   = peer.connect(hostPeerId);
 
@@ -268,30 +312,14 @@ export function useAudioEngine() {
         setIsLoading(false);
       });
 
-      // 2. Host will call us with audio — set up handler before data channel opens
+      // Handle incoming audio call from host
       peer.on('call', (call: any) => {
-        call.answer(); // no stream from client side
+        call.answer(); // no stream from client
 
         call.on('stream', (remoteStream: MediaStream) => {
-          // Play through an <audio> element (AudioContext can have issues autoplay)
-          const audio    = new Audio();
-          audio.srcObject = remoteStream;
-          audio.volume    = 1;
-          audio.play().catch(() => {
-            // Autoplay blocked — attach to body so browser allows it
-            document.body.appendChild(audio);
-            audio.play();
-          });
-
-          // Also wire to analyser for visualizer
-          const ctx = new AudioContext();
-          audioCtxRef.current = ctx;
-          const source   = ctx.createMediaStreamSource(remoteStream);
-          const analyser = ctx.createAnalyser();
-          analyser.fftSize = 256;
-          analyser.smoothingTimeConstant = 0.8;
-          source.connect(analyser);
-          setAnalyserNode(analyser);
+          streamRef.current = remoteStream;
+          const ctx = audioCtxRef.current!;
+          playStream(remoteStream, ctx);
 
           setMode('client');
           startStatsTick();
@@ -313,7 +341,7 @@ export function useAudioEngine() {
         const isNotFound = err?.type === 'peer-unavailable';
         setError(
           isNotFound
-            ? `Room "${trimmedCode}" not found. Make sure the host is running and the code is correct.`
+            ? `Room "${trimmedCode}" not found. Make sure the host is running first.`
             : `Connection error: ${err?.message ?? err?.type}`
         );
         cleanup();
@@ -326,7 +354,7 @@ export function useAudioEngine() {
       setIsLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadPeer, startStatsTick, cleanup]);
+  }, [loadPeer, startStatsTick, playStream, cleanup]);
 
   // ── STOP ──────────────────────────────────────────────────────────────────
 
@@ -345,6 +373,8 @@ export function useAudioEngine() {
     connectedClients,
     analyserNode,
     roomCode,
+    needsGesture,
+    resumeAudio,
     startHost,
     startClient,
     stop,

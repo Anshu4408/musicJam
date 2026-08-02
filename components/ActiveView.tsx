@@ -14,7 +14,9 @@ interface ActiveViewProps {
   analyserNode:     AnalyserNode | null;
   isLoading:        boolean;
   roomCode:         string;
+  needsGesture:     boolean;
   onStop:           () => void;
+  onResumeAudio:    () => void;
 }
 
 export default function ActiveView({
@@ -24,7 +26,9 @@ export default function ActiveView({
   analyserNode,
   isLoading,
   roomCode,
+  needsGesture,
   onStop,
+  onResumeAudio,
 }: ActiveViewProps) {
   const isHost      = mode === 'host';
   const accentColor = isHost ? COLORS.neonPurple : COLORS.neonBlue;
@@ -45,6 +49,24 @@ export default function ActiveView({
 
   return (
     <section className="active-view">
+
+      {/* ── "Tap to Listen" overlay for mobile autoplay block ── */}
+      {needsGesture && (
+        <div className="tap-to-listen">
+          <button
+            id="tap-to-listen-btn"
+            className="tap-to-listen__btn"
+            onClick={onResumeAudio}
+          >
+            <span className="tap-to-listen__icon">🔊</span>
+            <span className="tap-to-listen__label">Tap to Listen</span>
+            <span className="tap-to-listen__sub">
+              Your browser requires a tap to start audio
+            </span>
+          </button>
+        </div>
+      )}
+
       {/* Pulsing icon */}
       <div className="active-icon-container">
         <PulseRing color={accentColor} active={true} />
@@ -53,6 +75,14 @@ export default function ActiveView({
 
       <h2 className="active-title">{title}</h2>
       <p className="active-subtitle">{subtitle}</p>
+
+      {/* Client status indicator */}
+      {!isHost && !needsGesture && (
+        <div className="listening-badge">
+          <span className="status-dot status-dot--live" />
+          <span>Listening</span>
+        </div>
+      )}
 
       {/* Room code banner (host only) */}
       {isHost && roomCode && (

@@ -940,6 +940,83 @@ button {
   line-height: 1.5;
 }
 
+/* ── Tap to Listen (mobile autoplay fix) ───────────────────────────────────── */
+
+.tap-to-listen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(5, 10, 15, 0.85);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fade-in 0.3s ease both;
+}
+
+.tap-to-listen__btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-neon-blue);
+  border-radius: var(--radius-xl);
+  padding: 40px 56px;
+  box-shadow:
+    0 0 60px #00D4FF20,
+    0 0 0 1px #00D4FF15;
+  cursor: pointer;
+  transition: transform var(--transition-spring), box-shadow var(--transition-medium);
+  animation: fade-in-up 0.4s ease both;
+}
+
+.tap-to-listen__btn:hover,
+.tap-to-listen__btn:active {
+  transform: scale(1.04);
+  box-shadow:
+    0 0 80px #00D4FF35,
+    0 0 0 1px #00D4FF30;
+}
+
+.tap-to-listen__icon {
+  font-size: 56px;
+  filter: drop-shadow(0 0 20px #00D4FF80);
+  animation: glow-pulse 1.6s ease-in-out infinite;
+}
+
+.tap-to-listen__label {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--color-neon-blue);
+  letter-spacing: -0.3px;
+}
+
+.tap-to-listen__sub {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  text-align: center;
+  max-width: 220px;
+  line-height: 1.5;
+}
+
+/* ── Listening Badge ───────────────────────────────────────────────────────── */
+
+.listening-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-neon-green);
+  background: #10B98112;
+  border: 1px solid #10B98130;
+  border-radius: 999px;
+  padding: 6px 14px;
+  margin-bottom: 20px;
+  animation: fade-in 0.4s ease both;
+}
+
 /* ── Footer ────────────────────────────────────────────────────────────────── */
 
 .footer {

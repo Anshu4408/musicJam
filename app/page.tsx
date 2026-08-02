@@ -10,7 +10,7 @@ import { useAudioEngine } from '@/hooks/useAudioEngine';
 export default function Home() {
   const {
     mode, isLoading, error, stats, connectedClients, analyserNode,
-    roomCode, startHost, startClient, stop,
+    roomCode, needsGesture, resumeAudio, startHost, startClient, stop,
   } = useAudioEngine();
 
   return (
@@ -35,7 +35,9 @@ export default function Home() {
               analyserNode={analyserNode}
               isLoading={isLoading}
               roomCode={roomCode}
+              needsGesture={needsGesture}
               onStop={stop}
+              onResumeAudio={resumeAudio}
             />
           ) : (
             <SelectionView
