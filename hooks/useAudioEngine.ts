@@ -140,22 +140,24 @@ function encodeInit(): ArrayBuffer {
 }
 
 /**
- * Safely extract a proper ArrayBuffer from whatever PeerJS hands us.
- * PeerJS 'none' serialization can deliver ArrayBuffer, Blob, or a typed-array
- * view with a non-zero byteOffset — we must slice to get a fresh buffer
- * starting at index 0, otherwise DataView reads from the wrong position.
+ * Async helper — PeerJS 'binary' (BinaryPack) can deliver data as:
+ *   ArrayBuffer  — Chrome / Firefox desktop
+ *   Blob         — Safari, some mobile browsers
+ *   TypedArray   — Node.js / some environments (byteOffset may be non-zero)
+ * We normalise all of them to a fresh ArrayBuffer starting at byte 0.
  */
-function toArrayBuffer(raw: unknown): ArrayBuffer | null {
+async function rawToAB(raw: unknown): Promise<ArrayBuffer | null> {
+  if (raw instanceof Blob)        return raw.arrayBuffer();
   if (raw instanceof ArrayBuffer) return raw;
   if (ArrayBuffer.isView(raw)) {
     const v = raw as ArrayBufferView;
     return v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength);
   }
-  return null; // Blob: handled async where needed
+  return null;
 }
 
-function decodeMsg(raw: unknown): any {
-  const buf = toArrayBuffer(raw);
+async function decodeRaw(raw: unknown): Promise<any> {
+  const buf = await rawToAB(raw);
   if (!buf || buf.byteLength < 1) return null;
   const view = new DataView(buf);
   const type = view.getUint8(0);
@@ -165,7 +167,7 @@ function decodeMsg(raw: unknown): any {
         type: MSG_AUDIO,
         seq: view.getUint32(1, true),
         ts:  view.getFloat64(5, true),
-        samples: new Int16Array(buf.slice(13)), // slice keeps own buffer
+        samples: new Int16Array(buf.slice(13)),
       };
       case MSG_PING: return {
         type: MSG_PING,
@@ -187,6 +189,7 @@ function decodeMsg(raw: unknown): any {
     }
   } catch { return null; }
 }
+
 
 // ─── PCM helpers ──────────────────────────────────────────────────────────────
 
@@ -412,11 +415,12 @@ export function useAudioEngine() {
 
           // Handle NTP pings from client
           conn.on('data', (raw: unknown) => {
-            const msg = decodeMsg(raw);
-            if (msg?.type === MSG_PING) {
-              const pong = encodePong(msg.id, audioCtxRef.current!.currentTime, msg.clientTs);
-              try { conn.send(pong); } catch {}
-            }
+            void decodeRaw(raw).then(msg => {
+              if (msg?.type === MSG_PING) {
+                const pong = encodePong(msg.id, audioCtxRef.current!.currentTime, msg.clientTs);
+                try { conn.send(pong); } catch {}
+              }
+            });
           });
 
           conn.on('close', () => {
@@ -497,8 +501,10 @@ export function useAudioEngine() {
 
       const hostId = `mj2-${roomId}`;
       const conn   = peer.connect(hostId, {
-        reliable:      true,
-        serialization: 'none', // send/receive raw ArrayBuffer, no BinaryPack overhead
+        reliable: true,
+        // No serialization option — let PeerJS use its default 'binary' (BinaryPack).
+        // 'none' is in the TypeScript types but NOT in the runtime serialiser map,
+        // causing: this._serializers[t.serializer] is undefined.
       });
 
       // Timeout: if data channel doesn't open in CONN_TIMEOUT ms, fail clearly.
@@ -556,45 +562,39 @@ export function useAudioEngine() {
       // ── Receive frames + NTP pongs ────────────────────────────────────────
 
       conn.on('data', (raw: unknown) => {
-        const msg = decodeMsg(raw); // toArrayBuffer() handles all typed-array variants
-        if (!msg) return;
+        void decodeRaw(raw).then(msg => {
+          if (!msg) return;
 
-        if (msg.type === MSG_PONG) {
-          // NTP: update clock offset estimate
-          const sendTs = pingTsRef.current.get(msg.id);
-          if (sendTs === undefined) return;
-          pingTsRef.current.delete(msg.id);
+          if (msg.type === MSG_PONG) {
+            const sendTs = pingTsRef.current.get(msg.id);
+            if (sendTs === undefined) return;
+            pingTsRef.current.delete(msg.id);
 
-          const rtt = ctx.currentTime - sendTs;
-          rttHistRef.current.push(rtt);
-          if (rttHistRef.current.length > MAX_RTT_HIST) rttHistRef.current.shift();
+            const rtt = ctx.currentTime - sendTs;
+            rttHistRef.current.push(rtt);
+            if (rttHistRef.current.length > MAX_RTT_HIST) rttHistRef.current.shift();
 
-          const minRtt       = Math.min(...rttHistRef.current);
-          // clockOffset = hostCtxTime − clientCtxTime
-          clockOffsetRef.current = msg.hostTs - sendTs - minRtt / 2;
-          return;
-        }
+            const minRtt = Math.min(...rttHistRef.current);
+            clockOffsetRef.current = msg.hostTs - sendTs - minRtt / 2;
+            return;
+          }
 
-        if (msg.type === MSG_AUDIO) {
-          // Schedule this frame at the correct client AudioContext time
-          const scheduleAt = msg.ts - clockOffsetRef.current + BUFFER_DELAY;
+          if (msg.type === MSG_AUDIO) {
+            const scheduleAt = msg.ts - clockOffsetRef.current + BUFFER_DELAY;
+            if (scheduleAt < ctx.currentTime) return;
 
-          if (scheduleAt < ctx.currentTime) return; // too late, skip
-
-          try {
-            const f32    = i16ToF32(msg.samples);
-            const buffer = ctx.createBuffer(1, f32.length, SAMPLE_RATE);
-            buffer.getChannelData(0).set(f32);
-
-            const src = ctx.createBufferSource();
-            src.buffer = buffer;
-            // Connect to both analyser (visualizer) and destination (speakers)
-            src.connect(analyser);
-            src.connect(ctx.destination);
-            src.start(scheduleAt);
-          } catch {}
-          return;
-        }
+            try {
+              const f32    = i16ToF32(msg.samples);
+              const buffer = ctx.createBuffer(1, f32.length, SAMPLE_RATE);
+              buffer.getChannelData(0).set(f32);
+              const src = ctx.createBufferSource();
+              src.buffer = buffer;
+              src.connect(analyser);
+              src.connect(ctx.destination);
+              src.start(scheduleAt);
+            } catch {}
+          }
+        });
       });
 
       conn.on('close', () => {
