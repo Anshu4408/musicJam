@@ -43,34 +43,60 @@ export interface EngineStats {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const SAMPLE_RATE    = 48_000;
-const CHUNK_SAMPLES  = 2_048;   // 42.67 ms per frame
-const BUFFER_DELAY   = 1.2;     // seconds — all clients buffer ahead by this
+// 24 kHz mono halves bandwidth vs 48 kHz (≈ 384 kbps instead of 768 kbps)
+// which dramatically reduces data-channel pressure on slower connections.
+const SAMPLE_RATE    = 24_000;
+const CHUNK_SAMPLES  = 2_048;   // 85.3 ms per frame at 24 kHz
+const BUFFER_DELAY   = 1.5;     // seconds — uniform ahead-buffer for all clients
 const NTP_INTERVAL   = 2_000;   // ms between NTP rounds
 const MAX_RTT_HIST   = 8;       // keep last N RTT samples for median
+const CONN_TIMEOUT   = 18_000;  // ms — give up connecting after this
 
 const MSG_AUDIO = 1;
 const MSG_PING  = 2;
 const MSG_PONG  = 3;
 const MSG_INIT  = 4;
 
-// ICE servers: multiple STUN + free TURN relays for NAT traversal
+// ICE servers — STUN discovers public IP; TURN relays when P2P is blocked.
+// Multiple providers & ports maximise the chance that at least one works
+// regardless of firewall, carrier-grade NAT, or ISP restrictions.
 const ICE_SERVERS = [
+  // Google STUN (most reliable, almost never blocked)
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
-  // Open Relay Project — free public TURN servers
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+  // Cloudflare STUN
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  // Open Relay Project TURN — UDP, TCP, port 80 & 443
+  // Port 443/TCP is accepted by nearly every firewall
   { urls: 'turn:openrelay.metered.ca:80',
     username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turn:openrelay.metered.ca:443',
     username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turn:openrelay.metered.ca:443?transport=tcp',
     username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:80?transport=tcp',
+    username: 'openrelayproject', credential: 'openrelayproject' },
+  // Metered.ca free TURN (additional relay)
+  { urls: 'turn:a.relay.metered.ca:80',
+    username: 'e499b2e86e5b3bc6e8f67d4e',
+    credential: 'nUEWPFLyf+8XAYT/' },
+  { urls: 'turn:a.relay.metered.ca:443',
+    username: 'e499b2e86e5b3bc6e8f67d4e',
+    credential: 'nUEWPFLyf+8XAYT/' },
+  { urls: 'turn:a.relay.metered.ca:443?transport=tcp',
+    username: 'e499b2e86e5b3bc6e8f67d4e',
+    credential: 'nUEWPFLyf+8XAYT/' },
 ];
 
 const PEER_CONFIG = {
   debug: 0,
-  config: { iceServers: ICE_SERVERS },
+  config: {
+    iceServers: ICE_SERVERS,
+    iceTransportPolicy: 'all' as RTCIceTransportPolicy, // try direct first, relay as fallback
+  },
 };
 
 // ─── Binary codec ─────────────────────────────────────────────────────────────
@@ -113,8 +139,24 @@ function encodeInit(): ArrayBuffer {
   return buf;
 }
 
-function decodeMsg(buf: ArrayBuffer): any {
-  if (buf.byteLength < 1) return null;
+/**
+ * Safely extract a proper ArrayBuffer from whatever PeerJS hands us.
+ * PeerJS 'none' serialization can deliver ArrayBuffer, Blob, or a typed-array
+ * view with a non-zero byteOffset — we must slice to get a fresh buffer
+ * starting at index 0, otherwise DataView reads from the wrong position.
+ */
+function toArrayBuffer(raw: unknown): ArrayBuffer | null {
+  if (raw instanceof ArrayBuffer) return raw;
+  if (ArrayBuffer.isView(raw)) {
+    const v = raw as ArrayBufferView;
+    return v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength);
+  }
+  return null; // Blob: handled async where needed
+}
+
+function decodeMsg(raw: unknown): any {
+  const buf = toArrayBuffer(raw);
+  if (!buf || buf.byteLength < 1) return null;
   const view = new DataView(buf);
   const type = view.getUint8(0);
   try {
@@ -123,7 +165,7 @@ function decodeMsg(buf: ArrayBuffer): any {
         type: MSG_AUDIO,
         seq: view.getUint32(1, true),
         ts:  view.getFloat64(5, true),
-        samples: new Int16Array(buf.slice(13)),
+        samples: new Int16Array(buf.slice(13)), // slice keeps own buffer
       };
       case MSG_PING: return {
         type: MSG_PING,
@@ -369,8 +411,8 @@ export function useAudioEngine() {
           setConnectedClients(clientConnsRef.current.size);
 
           // Handle NTP pings from client
-          conn.on('data', (raw: any) => {
-            const msg = decodeMsg(raw instanceof ArrayBuffer ? raw : raw.buffer ?? raw);
+          conn.on('data', (raw: unknown) => {
+            const msg = decodeMsg(raw);
             if (msg?.type === MSG_PING) {
               const pong = encodePong(msg.id, audioCtxRef.current!.currentTime, msg.clientTs);
               try { conn.send(pong); } catch {}
@@ -456,8 +498,23 @@ export function useAudioEngine() {
       const hostId = `mj2-${roomId}`;
       const conn   = peer.connect(hostId, {
         reliable:      true,
-        serialization: 'binary',
+        serialization: 'none', // send/receive raw ArrayBuffer, no BinaryPack overhead
       });
+
+      // Timeout: if data channel doesn't open in CONN_TIMEOUT ms, fail clearly.
+      // Without this the user would be stuck on the loading spinner indefinitely.
+      const connTimeout = setTimeout(() => {
+        if (!conn.open) {
+          setError(
+            `Connection timed out. Possible causes:\n` +
+            `• Wrong room code (check it with the host)\n` +
+            `• Host's browser blocked the stream\n` +
+            `• Strict firewall — try a different network`
+          );
+          cleanup();
+          setIsLoading(false);
+        }
+      }, CONN_TIMEOUT);
 
       peer.on('error', (err: any) => {
         const notFound = err?.type === 'peer-unavailable';
@@ -487,6 +544,7 @@ export function useAudioEngine() {
       };
 
       conn.on('open', () => {
+        clearTimeout(connTimeout); // connection succeeded — cancel the timeout
         // Start NTP immediately, then every 2s
         sendPing();
         ntpIntervalRef.current = setInterval(sendPing, NTP_INTERVAL);
@@ -497,13 +555,8 @@ export function useAudioEngine() {
 
       // ── Receive frames + NTP pongs ────────────────────────────────────────
 
-      conn.on('data', (raw: any) => {
-        const ab  = raw instanceof ArrayBuffer ? raw
-                  : raw?.buffer ? raw.buffer
-                  : null;
-        if (!ab) return;
-
-        const msg = decodeMsg(ab);
+      conn.on('data', (raw: unknown) => {
+        const msg = decodeMsg(raw); // toArrayBuffer() handles all typed-array variants
         if (!msg) return;
 
         if (msg.type === MSG_PONG) {
