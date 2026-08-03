@@ -32,17 +32,24 @@ export interface EngineStats {
   clockOffsetUs: number;
   bitrateKbps:   number;
   latencyMs:     number;
+  bufferMs:      number;   // current adaptive jitter buffer size
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const SAMPLE_RATE    = 24_000;          // Hz — halves bandwidth vs 48 kHz
-const CHUNK_SAMPLES  = 2_048;           // ~85 ms per frame at 24 kHz
-const START_BUFFER   = 0.6;             // seconds ahead of now to start playing
-const CATCHUP_THRESH = 0.5;             // seconds behind → reset anchor
-const NTP_INTERVAL   = 2_000;          // ms between NTP rounds
-const MAX_RTT_HIST   = 8;
-const CONN_TIMEOUT   = 18_000;          // ms
+const SAMPLE_RATE      = 24_000;          // Hz
+const CHUNK_SAMPLES    = 512;             // 21 ms per frame at 24 kHz (was 2048→85 ms)
+const MIN_BUFFER       = 0.08;            // 80 ms — minimum jitter buffer
+const MAX_BUFFER       = 0.60;            // 600 ms — maximum before it feels broken
+const CATCHUP_THRESH   = 0.25;            // seconds behind → reset anchor
+const NTP_INTERVAL     = 2_000;           // ms
+const MAX_RTT_HIST     = 8;
+const CONN_TIMEOUT     = 18_000;          // ms
+// Adaptive jitter buffer tuning
+const JB_WINDOW        = 40;              // frames to measure over (~840 ms at 512/24 kHz)
+const JB_TARGET_FLOOR  = 0.015;           // want ≥15 ms headroom
+const JB_SHRINK_STEP   = 0.010;           // shrink by 10 ms per window
+const JB_GROW_FACTOR   = 1.5;            // overshoot when growing
 
 // ICE servers — STUN + multiple free TURN providers
 const ICE_SERVERS = [
@@ -144,6 +151,7 @@ export function useAudioEngine() {
   // Stats
   const frameCountRef = useRef(0);
   const bytesRef      = useRef(0);
+  const bufferRef     = useRef(MIN_BUFFER); // current adaptive jitter buffer size (seconds)
 
   // ── Cleanup ────────────────────────────────────────────────────────────────
 
@@ -190,8 +198,8 @@ export function useAudioEngine() {
 
   const startStatsTick = useCallback(() => {
     statsIntervalRef.current = setInterval(() => {
-      const fps = 11.7;
-      const bpt = (CHUNK_SAMPLES * 2 * 1.33) / fps; // base64 ≈ 33% overhead
+      const fps = SAMPLE_RATE / CHUNK_SAMPLES; // 46.9 fps at 512/24kHz
+      const bpt = (CHUNK_SAMPLES * 2 * 1.37) / fps; // base64 ~37% overhead
       frameCountRef.current += fps;
       bytesRef.current      += bpt;
 
@@ -205,8 +213,9 @@ export function useAudioEngine() {
         bytesSent:     Math.round(bytesRef.current),
         lastRttUs:     Math.round(rttUs),
         clockOffsetUs: Math.round(offsetUs),
-        bitrateKbps:   Math.round((bpt * 8) / (1 / fps) / 1000),
-        latencyMs:     Math.round(Math.abs(offsetUs) / 1000),
+        bitrateKbps:   Math.round((bpt * 8 * fps) / 1000),
+        latencyMs:     Math.round(bufferRef.current * 1000 + CHUNK_SAMPLES / SAMPLE_RATE * 500),
+        bufferMs:      Math.round(bufferRef.current * 1000),
       });
     }, 500);
   }, []);
@@ -421,10 +430,11 @@ export function useAudioEngine() {
         startStatsTick();
       });
 
-      // ── Relative scheduling state ─────────────────────────────────────────
-      // Anchor set on first good audio frame; relative timing thereafter.
-      let anchorClientTime: number | null = null; // ctx.currentTime when first frame plays
-      let anchorHostTs:     number | null = null; // host's frame.ts at that moment
+      // ── Relative scheduling state + adaptive jitter buffer ──────────────
+      let anchorClientTime: number | null = null;
+      let anchorHostTs:     number | null = null;
+      const headroomHistory: number[] = [];  // rolling headroom window
+      bufferRef.current = MIN_BUFFER;        // reset buffer for this session
 
       conn.on('data', (msg: any) => {
         if (!msg?.type) return;
@@ -451,23 +461,50 @@ export function useAudioEngine() {
             return;
           }
 
-          // ── Set anchor on first frame ──────────────────────────────────
+          // ── Adaptive jitter buffer ─────────────────────────────────────
+          // Set anchor on first frame with current adaptive buffer size
           if (anchorClientTime === null || anchorHostTs === null) {
-            anchorClientTime = ctx.currentTime + START_BUFFER;
+            anchorClientTime = ctx.currentTime + bufferRef.current;
             anchorHostTs     = msg.ts;
+            headroomHistory.length = 0;
           }
 
-          // Relative schedule: anchor + elapsed host time since first frame
+          // Relative schedule: preserves host's relative timing exactly
           let scheduleAt = anchorClientTime + (msg.ts - anchorHostTs);
 
-          // If we've fallen behind (e.g. tab backgrounded), reset anchor
+          // Hard reset if we've fallen badly behind (tab backgrounded, etc.)
           if (scheduleAt < ctx.currentTime - CATCHUP_THRESH) {
-            anchorClientTime = ctx.currentTime + START_BUFFER;
+            anchorClientTime = ctx.currentTime + bufferRef.current;
             anchorHostTs     = msg.ts;
             scheduleAt       = anchorClientTime;
+            headroomHistory.length = 0;
           }
 
-          // Skip frames that are already past (brief gap, not a reset situation)
+          // Measure headroom (how far in the future this frame is scheduled)
+          const headroom = scheduleAt - ctx.currentTime;
+          headroomHistory.push(headroom);
+
+          // Every JB_WINDOW frames, tune the buffer size
+          if (headroomHistory.length >= JB_WINDOW) {
+            const minHeadroom = Math.min(...headroomHistory);
+            headroomHistory.length = 0; // reset window
+
+            if (minHeadroom < JB_TARGET_FLOOR) {
+              // Frames arriving too close to their play time (or late) → grow buffer
+              const deficit = JB_TARGET_FLOOR - minHeadroom;
+              const grow    = deficit * JB_GROW_FACTOR;
+              bufferRef.current = Math.min(MAX_BUFFER, bufferRef.current + grow);
+              // Shift anchor forward so future frames land further ahead
+              anchorClientTime = (anchorClientTime ?? ctx.currentTime) + grow;
+            } else if (minHeadroom > JB_TARGET_FLOOR * 4 && bufferRef.current > MIN_BUFFER) {
+              // Plenty of headroom → cautiously shrink buffer toward minimum
+              bufferRef.current = Math.max(MIN_BUFFER, bufferRef.current - JB_SHRINK_STEP);
+              // Shift anchor back to reduce latency
+              anchorClientTime = (anchorClientTime ?? ctx.currentTime) - JB_SHRINK_STEP;
+            }
+          }
+
+          // Skip the frame if we've genuinely fallen behind (post-adjustment)
           if (scheduleAt < ctx.currentTime) return;
 
           try {
@@ -478,8 +515,8 @@ export function useAudioEngine() {
 
             const src = ctx.createBufferSource();
             src.buffer = buffer;
-            src.connect(analyser);    // feed visualizer
-            src.connect(ctx.destination); // feed speakers
+            src.connect(analyser);
+            src.connect(ctx.destination);
             src.start(scheduleAt);
           } catch {}
         }
