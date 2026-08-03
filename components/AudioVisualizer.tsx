@@ -49,16 +49,10 @@ export default function AudioVisualizer({
           return slice.reduce((s, v) => s + v, 0) / (slice.length || 1) / 255;
         });
       } else {
-        // Client mode: generate a fake animated waveform
-        fakePhaseRef.current += 0.07;
+        // No analyser yet — show idle flat bars
+        fakePhaseRef.current += 0.03;
         amplitudes = Array.from({ length: BAR_COUNT }, (_, i) => {
-          const t = fakePhaseRef.current;
-          return (
-            0.3 +
-            0.3 * Math.sin(i * 0.4 + t) +
-            0.2 * Math.sin(i * 0.15 + t * 1.3) +
-            0.1 * Math.random()
-          );
+          return 0.04 + 0.02 * Math.sin(i * 0.5 + fakePhaseRef.current);
         });
       }
 
