@@ -1,28 +1,26 @@
 /**
  * useAudioEngine.ts
  *
- * ARCHITECTURE (v5 — Synchronized File Playback):
+ * ARCHITECTURE (v6 — Persistent Library & Late-Joiner Sync):
  *
  *  Transport: File chunks sent over PeerJS SCTP Data Channels.
- *  Sync: NTP ping/pong to measure exact clock offset between Host and Client.
- *  Playback: Web Audio API (AudioBufferSourceNode) for frame-perfect scheduling.
+ *  Storage: IndexedDB wrapper (lib/db) persists tracks.
+ *  Sync: NTP ping/pong to measure exact clock offset. Web Audio API for playback.
  *
- *  Host flow:
- *    Host selects an audio file -> reads into ArrayBuffer.
- *    Decodes to AudioBuffer for local playback.
- *    Sends file ArrayBuffer in chunks to all connected clients.
- *    Host sends PLAY(startNtp, seekPos) -> schedules its own playback at startNtp.
- *
- *  Client flow:
- *    Connects data channel -> receives file chunks -> reconstructs ArrayBuffer.
- *    Decodes to AudioBuffer.
- *    Receives PLAY(startNtp, seekPos) -> calculates local time = startNtp - offset.
- *    Schedules AudioBufferSourceNode.start(ctx.currentTime + delay) for perfect sync.
+ *  Late-Joiner Handshake:
+ *    1. Client connects.
+ *    2. Host sends { type: 'welcome', trackName, isPlaying, seekPos, startNtp }.
+ *    3. Client checks its local IndexedDB for `trackName`.
+ *       a. If found: Instantly load & start playing if needed.
+ *       b. If missing: Client sends { type: 'request_file' }.
+ *    4. Host sends the file chunks specifically to that client.
+ *    5. Client finishes download -> Saves to IndexedDB -> Starts playing.
  */
 
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { saveTrackToDb, getTrackFromDb, getAllTrackNamesFromDb, deleteTrackFromDb } from '@/lib/db';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,7 +36,7 @@ export interface EngineStats {
 const NTP_INTERVAL  = 2_000;
 const MAX_RTT_HIST  = 8;
 const CONN_TIMEOUT  = 18_000;
-const CHUNK_SIZE    = 64 * 1024; // 64 KB chunks for WebRTC data channels
+const CHUNK_SIZE    = 64 * 1024; // 64 KB chunks
 
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302'  },
@@ -77,7 +75,8 @@ export function useAudioEngine() {
   const [roomCode, setRoomCode]                 = useState('');
   const [needsGesture, setNeedsGesture]         = useState(false);
 
-  // Playback state
+  // Library & Playback state
+  const [libraryTracks, setLibraryTracks]       = useState<string[]>([]);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isPlaying, setIsPlaying]               = useState(false);
   const [trackName, setTrackName]               = useState<string | null>(null);
@@ -100,6 +99,11 @@ export function useAudioEngine() {
   const rttMsHistRef   = useRef<number[]>([]);
   const pingTsRef      = useRef<Map<number, number>>(new Map());
   const pingIdRef      = useRef(0);
+
+  // Load library on mount
+  useEffect(() => {
+    getAllTrackNamesFromDb().then(setLibraryTracks).catch(() => {});
+  }, []);
 
   // ── Cleanup ────────────────────────────────────────────────────────────────
 
@@ -179,13 +183,11 @@ export function useAudioEngine() {
     const buffer = audioBufferRef.current;
     if (!ctx || !buffer) return;
 
-    // Stop existing source if playing
     if (sourceNodeRef.current) {
       try { sourceNodeRef.current.stop(); } catch {}
       sourceNodeRef.current.disconnect();
     }
 
-    // Calculate when this should start playing on the local AudioContext timeline
     const localWallTime = performance.now();
     const targetWallTime = ntpTime - clockOffsetRef.current;
     const delayMs = targetWallTime - localWallTime;
@@ -196,7 +198,6 @@ export function useAudioEngine() {
     if (analyserNode) source.connect(analyserNode);
     source.connect(ctx.destination);
     
-    // If delay is negative (we missed the start time), adjust seekPos forward
     let actualSeek = seekPos;
     let startCtxTime = ctx.currentTime;
     
@@ -228,6 +229,18 @@ export function useAudioEngine() {
 
   // ── HOST ──────────────────────────────────────────────────────────────────
 
+  const sendFileToConnection = async (conn: any, name: string, arrayBuffer: ArrayBuffer) => {
+    conn.send({ type: 'file_start', name, size: arrayBuffer.byteLength });
+    let offset = 0;
+    while (offset < arrayBuffer.byteLength) {
+      const chunk = arrayBuffer.slice(offset, offset + CHUNK_SIZE);
+      conn.send({ type: 'file_chunk', data: chunk });
+      offset += CHUNK_SIZE;
+      await new Promise(r => setTimeout(r, 5));
+    }
+    conn.send({ type: 'file_end' });
+  };
+
   const startHost = useCallback(async () => {
     setError(null);
     setIsLoading(true);
@@ -257,7 +270,20 @@ export function useAudioEngine() {
           clientConnsRef.current.set(dataConn.peer, dataConn);
           setConnectedClients(clientConnsRef.current.size);
 
-          dataConn.on('data', (msg: any) => {
+          // 1. Send Welcome Message (Handshake)
+          const currentSeek = isPlaying && audioCtxRef.current 
+            ? playbackStartOffsetRef.current + (audioCtxRef.current.currentTime - playbackStartCtxTimeRef.current)
+            : playbackStartOffsetRef.current;
+          
+          dataConn.send({
+            type: 'welcome',
+            trackName: trackName,
+            isPlaying: isPlaying,
+            seekPos: currentSeek,
+            startNtp: performance.now(),
+          });
+
+          dataConn.on('data', async (msg: any) => {
             if (msg?.type === 'ping') {
               dataConn.send({
                 type: 'pong',
@@ -265,6 +291,12 @@ export function useAudioEngine() {
                 hostTs: performance.now(),
                 clientTs: msg.clientTs,
               });
+            } else if (msg?.type === 'request_file' && trackName) {
+              // 2. Client doesn't have the file, send it specifically to them
+              const track = await getTrackFromDb(trackName);
+              if (track) {
+                await sendFileToConnection(dataConn, trackName, track.data);
+              }
             }
           });
 
@@ -287,7 +319,38 @@ export function useAudioEngine() {
       cleanup();
       setIsLoading(false);
     }
-  }, [loadPeer, startStatsTick, cleanup]);
+  }, [loadPeer, startStatsTick, cleanup, isPlaying, trackName]);
+
+  const loadTrackIntoEngine = async (name: string, arrayBuffer: ArrayBuffer) => {
+    const ctx = audioCtxRef.current;
+    if (ctx) {
+      audioBufferRef.current = await ctx.decodeAudioData(arrayBuffer.slice(0));
+    }
+    setTrackName(name);
+    setDownloadProgress(100);
+    playbackStartCtxTimeRef.current = 0;
+    playbackStartOffsetRef.current = 0;
+    if (isPlaying) stopPlayback();
+  };
+
+  // Host: Load from Library
+  const loadFromLibrary = useCallback(async (name: string) => {
+    setIsLoading(true);
+    try {
+      const track = await getTrackFromDb(name);
+      if (!track) throw new Error("Track not found in library.");
+      
+      await loadTrackIntoEngine(name, track.data);
+      
+      // Tell all clients we switched tracks, they will self-sync
+      const conns = Array.from(clientConnsRef.current.values());
+      conns.forEach(c => c.send({ type: 'welcome', trackName: name, isPlaying: false, seekPos: 0, startNtp: performance.now() }));
+    } catch (e: any) {
+      setError(`Failed to load from library: ${e.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isPlaying, stopPlayback]);
 
   // Host: File Upload
   const uploadFile = useCallback(async (file: File) => {
@@ -296,38 +359,21 @@ export function useAudioEngine() {
     try {
       const arrayBuffer = await file.arrayBuffer();
       
-      // Decode audio for local playback
-      const ctx = audioCtxRef.current;
-      if (ctx) {
-        audioBufferRef.current = await ctx.decodeAudioData(arrayBuffer.slice(0));
-      }
-      setTrackName(file.name);
+      // Save to IDB
+      await saveTrackToDb(file.name, arrayBuffer);
+      setLibraryTracks(prev => Array.from(new Set([...prev, file.name])));
       
-      // Send to all clients
+      await loadTrackIntoEngine(file.name, arrayBuffer);
+      
+      // Tell clients to sync
       const conns = Array.from(clientConnsRef.current.values());
-      if (conns.length > 0) {
-        conns.forEach(c => c.send({ type: 'file_start', name: file.name, size: arrayBuffer.byteLength }));
-        
-        let offset = 0;
-        while (offset < arrayBuffer.byteLength) {
-          const chunk = arrayBuffer.slice(offset, offset + CHUNK_SIZE);
-          conns.forEach(c => c.send({ type: 'file_chunk', data: chunk }));
-          offset += CHUNK_SIZE;
-          setDownloadProgress((offset / arrayBuffer.byteLength) * 100);
-          
-          // Yield to event loop so we don't freeze the browser
-          await new Promise(r => setTimeout(r, 5));
-        }
-        
-        conns.forEach(c => c.send({ type: 'file_end' }));
-      }
-      setDownloadProgress(100);
+      conns.forEach(c => c.send({ type: 'welcome', trackName: file.name, isPlaying: false, seekPos: 0, startNtp: performance.now() }));
     } catch (e: any) {
       setError(`File processing failed: ${e.message}`);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isPlaying, stopPlayback]);
 
   // Host: Broadcast Play/Pause
   const broadcastPlay = useCallback(() => {
@@ -400,6 +446,10 @@ export function useAudioEngine() {
       let chunks: ArrayBuffer[] = [];
       let expectedSize = 0;
       let receivedSize = 0;
+      let receivingTrackName = '';
+
+      // Late-joiner sync state
+      let pendingWelcomeState: { isPlaying: boolean, startNtp: number, seekPos: number } | null = null;
 
       conn.on('open', () => {
         clearTimeout(connTimeout);
@@ -428,18 +478,42 @@ export function useAudioEngine() {
           if (rttMsHistRef.current.length > MAX_RTT_HIST) rttMsHistRef.current.shift();
           const minRtt = Math.min(...rttMsHistRef.current);
           clockOffsetRef.current = msg.hostTs - sendTime - minRtt / 2;
+        } else if (msg?.type === 'welcome') {
+          // Handshake protocol
+          if (!msg.trackName) return;
+          
+          setTrackName(msg.trackName);
+          stopPlayback();
+          
+          // Check if we have it in IndexedDB
+          const savedTrack = await getTrackFromDb(msg.trackName);
+          if (savedTrack) {
+            setDownloadProgress(100);
+            audioBufferRef.current = await ctx.decodeAudioData(savedTrack.data.slice(0));
+            
+            // If the host is currently playing, jump right in
+            if (msg.isPlaying) {
+              startPlaybackAt(msg.startNtp, msg.seekPos);
+            } else {
+              playbackStartOffsetRef.current = msg.seekPos;
+            }
+          } else {
+            // We don't have it, ask the host to send it
+            setDownloadProgress(0);
+            pendingWelcomeState = { isPlaying: msg.isPlaying, startNtp: msg.startNtp, seekPos: msg.seekPos };
+            conn.send({ type: 'request_file', trackName: msg.trackName });
+          }
         } else if (msg?.type === 'file_start') {
           chunks = [];
           receivedSize = 0;
           expectedSize = msg.size;
-          setTrackName(msg.name);
+          receivingTrackName = msg.name;
           setDownloadProgress(0);
         } else if (msg?.type === 'file_chunk') {
           chunks.push(msg.data);
           receivedSize += msg.data.byteLength;
           setDownloadProgress((receivedSize / expectedSize) * 100);
         } else if (msg?.type === 'file_end') {
-          // Stitch chunks together
           const fullBuffer = new Uint8Array(expectedSize);
           let offset = 0;
           for (const chunk of chunks) {
@@ -449,7 +523,19 @@ export function useAudioEngine() {
           chunks = [];
           
           try {
+            // Save to IDB for next time!
+            await saveTrackToDb(receivingTrackName, fullBuffer.buffer.slice(0));
+            setLibraryTracks(prev => Array.from(new Set([...prev, receivingTrackName])));
+            
             audioBufferRef.current = await ctx.decodeAudioData(fullBuffer.buffer);
+            
+            // Apply pending welcome state if we missed it while downloading
+            if (pendingWelcomeState && pendingWelcomeState.isPlaying) {
+              startPlaybackAt(pendingWelcomeState.startNtp, pendingWelcomeState.seekPos);
+            } else if (pendingWelcomeState) {
+              playbackStartOffsetRef.current = pendingWelcomeState.seekPos;
+            }
+            pendingWelcomeState = null;
           } catch (e) {
             setError("Failed to decode audio file.");
           }
@@ -458,7 +544,7 @@ export function useAudioEngine() {
         } else if (msg?.type === 'pause') {
           stopPlayback();
           if (msg.seekPos !== undefined) {
-            playbackStartOffsetRef.current = msg.seekPos; // Sync exact pause frame
+            playbackStartOffsetRef.current = msg.seekPos;
           }
         } else if (msg?.type === 'sync') {
           if (isPlaying && ctx) {
@@ -467,7 +553,6 @@ export function useAudioEngine() {
              const expectedSeek = msg.seekPos + (delayMs < 0 ? Math.abs(delayMs/1000) : -(delayMs/1000));
              const localSeek = playbackStartOffsetRef.current + (ctx.currentTime - playbackStartCtxTimeRef.current);
              
-             // If we're drifted by more than 100ms, force an immediate resync
              if (Math.abs(localSeek - expectedSeek) > 0.1) {
                 startPlaybackAt(msg.startNtp, msg.seekPos);
              }
@@ -498,13 +583,18 @@ export function useAudioEngine() {
   const resumeAudio = useCallback(() => {
     audioCtxRef.current?.resume().then(() => setNeedsGesture(false)).catch(() => {});
   }, []);
+  
+  const deleteFromLibrary = useCallback(async (name: string) => {
+    await deleteTrackFromDb(name);
+    setLibraryTracks(prev => prev.filter(t => t !== name));
+  }, []);
 
   return {
     mode, isLoading, error, stats,
     connectedClients, analyserNode,
     roomCode, needsGesture,
-    trackName, downloadProgress, isPlaying,
-    uploadFile, broadcastPlay, broadcastPause,
+    trackName, downloadProgress, isPlaying, libraryTracks,
+    uploadFile, loadFromLibrary, deleteFromLibrary, broadcastPlay, broadcastPause,
     startHost, startClient, stop, resumeAudio,
   };
 }

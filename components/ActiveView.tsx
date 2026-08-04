@@ -8,21 +8,24 @@ import { AppMode, EngineStats } from '@/hooks/useAudioEngine';
 import { COLORS } from '@/lib/colors';
 
 interface ActiveViewProps {
-  mode:             AppMode;
-  stats:            EngineStats | null;
-  connectedClients: number;
-  analyserNode:     AnalyserNode | null;
-  isLoading:        boolean;
-  roomCode:         string;
-  needsGesture:     boolean;
-  trackName:        string | null;
-  downloadProgress: number;
-  isPlaying:        boolean;
-  onUploadFile:     (file: File) => void;
-  onBroadcastPlay:  () => void;
-  onBroadcastPause: () => void;
-  onStop:           () => void;
-  onResumeAudio:    () => void;
+  mode:                AppMode;
+  stats:               EngineStats | null;
+  connectedClients:    number;
+  analyserNode:        AnalyserNode | null;
+  isLoading:           boolean;
+  roomCode:            string;
+  needsGesture:        boolean;
+  trackName:           string | null;
+  downloadProgress:    number;
+  isPlaying:           boolean;
+  libraryTracks:       string[];
+  onUploadFile:        (file: File) => void;
+  onLoadFromLibrary:   (name: string) => void;
+  onDeleteFromLibrary: (name: string) => void;
+  onBroadcastPlay:     () => void;
+  onBroadcastPause:    () => void;
+  onStop:              () => void;
+  onResumeAudio:       () => void;
 }
 
 export default function ActiveView({
@@ -36,7 +39,10 @@ export default function ActiveView({
   trackName,
   downloadProgress,
   isPlaying,
+  libraryTracks,
   onUploadFile,
+  onLoadFromLibrary,
+  onDeleteFromLibrary,
   onBroadcastPlay,
   onBroadcastPause,
   onStop,
@@ -47,7 +53,7 @@ export default function ActiveView({
   const icon        = isHost ? '📡' : '🎧';
   const title       = isHost ? 'Host Session' : 'Listening Party';
   const subtitle    = isHost
-    ? 'Upload a track and control playback for all clients'
+    ? 'Upload a track or load from your local library'
     : 'Synchronized perfect 0ms playback';
 
   const [copied, setCopied] = useState(false);
@@ -127,12 +133,30 @@ export default function ActiveView({
                   style={{ display: 'none' }}
                   ref={fileInputRef}
                 />
+                
+                <div className="library-section">
+                  {libraryTracks.length > 0 && (
+                    <>
+                      <h4 className="library-title">My Saved Library</h4>
+                      <ul className="library-list">
+                        {libraryTracks.map(t => (
+                          <li key={t} className="library-item">
+                            <button className="library-play-btn" onClick={() => onLoadFromLibrary(t)}>▶ {t}</button>
+                            <button className="library-del-btn" onClick={() => onDeleteFromLibrary(t)} title="Delete from local cache">✕</button>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="library-divider">or</div>
+                    </>
+                  )}
+                </div>
+
                 <button 
                   className="primary-button" 
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isLoading || connectedClients === 0}
                 >
-                  {isLoading ? 'Uploading...' : connectedClients === 0 ? 'Wait for clients to join...' : '📁 Select Audio File'}
+                  {isLoading ? 'Uploading...' : connectedClients === 0 ? 'Wait for clients to join...' : '📁 Select New Audio File'}
                 </button>
               </div>
             )}
@@ -176,6 +200,9 @@ export default function ActiveView({
             ) : (
               <div className="waiting-prompt">
                 <p>Waiting for host to select a track...</p>
+                {libraryTracks.length > 0 && (
+                  <p className="client-cache-note">({libraryTracks.length} tracks cached on your device for instant loading)</p>
+                )}
               </div>
             )}
           </div>
@@ -276,6 +303,81 @@ export default function ActiveView({
           margin: 0;
           font-style: italic;
         }
+        .client-cache-note {
+          font-size: 0.8rem;
+          margin-top: 8px !important;
+          color: rgba(255, 255, 255, 0.3) !important;
+        }
+        
+        .library-section {
+          margin-bottom: 24px;
+        }
+        .library-title {
+          font-size: 0.9rem;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          color: rgba(255, 255, 255, 0.5);
+          margin: 0 0 12px 0;
+        }
+        .library-list {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          max-height: 200px;
+          overflow-y: auto;
+        }
+        .library-item {
+          display: flex;
+          justify-content: space-between;
+          background: rgba(255, 255, 255, 0.03);
+          border-radius: 6px;
+          padding: 4px;
+        }
+        .library-item:hover {
+          background: rgba(255, 255, 255, 0.08);
+        }
+        .library-play-btn {
+          background: transparent;
+          border: none;
+          color: #fff;
+          text-align: left;
+          padding: 8px 12px;
+          flex-grow: 1;
+          cursor: pointer;
+          font-size: 0.9rem;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .library-del-btn {
+          background: transparent;
+          border: none;
+          color: rgba(255, 100, 100, 0.6);
+          cursor: pointer;
+          padding: 0 12px;
+        }
+        .library-del-btn:hover {
+          color: rgba(255, 100, 100, 1);
+        }
+        .library-divider {
+          margin-top: 16px;
+          color: rgba(255, 255, 255, 0.3);
+          font-size: 0.9rem;
+          position: relative;
+        }
+        .library-divider::before, .library-divider::after {
+          content: '';
+          position: absolute;
+          top: 50%;
+          width: 40%;
+          height: 1px;
+          background: rgba(255, 255, 255, 0.1);
+        }
+        .library-divider::before { left: 0; }
+        .library-divider::after { right: 0; }
       `}</style>
     </section>
   );
