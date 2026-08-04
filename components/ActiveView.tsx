@@ -88,8 +88,19 @@ export default function ActiveView({
       </div>
 
       <div className="library-section">
+        {/* Massive Now Playing Visual */}
+        <div className="now-playing-hero">
+          <div className={`hero-art ${isPlaying ? 'playing' : ''}`}>
+            {isPlaying ? '🎧' : '🎵'}
+          </div>
+          <h2 className="hero-title">{trackName || 'No track selected'}</h2>
+          <p className="hero-subtitle">
+             {downloadProgress < 100 && trackName ? `Downloading ${Math.round(downloadProgress)}%` : (trackName ? 'High-Fidelity Sync' : 'Waiting for audio...')}
+          </p>
+        </div>
+
         {isHost ? (
-          <>
+          <div className="host-library-wrapper">
             <div className="library-toolbar">
               <button 
                 className="btn-upload" 
@@ -142,14 +153,27 @@ export default function ActiveView({
                 ))
               )}
             </div>
-          </>
+          </div>
         ) : (
-          <div className="empty-state" style={{ marginTop: '40px' }}>
-            <h3>Connected as Client</h3>
-            <p>Waiting for the host to select and play music...</p>
-            <p style={{ marginTop: '16px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-              ({libraryTracks.length} tracks cached locally)
-            </p>
+          <div className="client-library-wrapper">
+            <h3 className="client-library-title">Cached on your device</h3>
+            <div className="track-list">
+              {libraryTracks.length === 0 ? (
+                <div className="empty-state">
+                  <p>No tracks cached yet.</p>
+                </div>
+              ) : (
+                libraryTracks.map((t, index) => (
+                  <div key={t} className={`track-item ${t === trackName ? 'active' : ''}`}>
+                    <div className="track-number">{index + 1}</div>
+                    <div className="track-info-col">
+                      <div className="track-title">{t}</div>
+                      <div className="track-artist">Available offline</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
       </div>
