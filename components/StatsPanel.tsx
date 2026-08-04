@@ -51,50 +51,31 @@ export default function StatsPanel({ stats, mode, connectedClients }: StatsPanel
         {mode === 'host' ? (
           <>
             <StatTile
-              label="Bitrate"
-              value={stats ? `${stats.bitrateKbps}` : '—'}
-              unit="kbps"
-              color={COLORS.neonBlue}
-            />
-            <StatTile
-              label="Frames Sent"
-              value={stats ? `${(stats.encodedFrames / 1000).toFixed(1)}k` : '—'}
-              unit="frames"
-              color={COLORS.neonPurple}
-            />
-            <StatTile
               label="Clients"
               value={`${connectedClients}`}
               unit="connected"
               color={COLORS.neonGreen}
             />
             <StatTile
-              label="Bytes Sent"
-              value={stats ? `${(stats.bytesSent / 1024 / 1024).toFixed(1)}` : '—'}
-              unit="MB"
-              color={COLORS.neonOrange}
+              label="Clock Sync RTT"
+              value={stats ? `${Math.round(stats.lastRttUs / 1000)}` : '—'}
+              unit="ms"
+              color={COLORS.neonPurple}
             />
           </>
         ) : (
           <>
             <StatTile
-              label="Total Latency"
-              value={stats ? `${stats.latencyMs}` : '—'}
+              label="Clock Offset"
+              value={stats ? `${Math.round(stats.clockOffsetUs / 1000)}` : '—'}
               unit="ms"
               color={COLORS.neonBlue}
             />
-
             <StatTile
-              label="RTT"
+              label="Sync RTT"
               value={stats ? `${Math.round(stats.lastRttUs / 1000)}` : '—'}
               unit="ms"
               color={COLORS.neonPurple}
-            />
-            <StatTile
-              label="Sync Quality"
-              value={syncQuality}
-              unit=""
-              color={syncColor}
             />
           </>
         )}

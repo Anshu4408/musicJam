@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import PulseRing from './PulseRing';
 import StatsPanel from './StatsPanel';
 import AudioVisualizer from './AudioVisualizer';
@@ -15,6 +15,12 @@ interface ActiveViewProps {
   isLoading:        boolean;
   roomCode:         string;
   needsGesture:     boolean;
+  trackName:        string | null;
+  downloadProgress: number;
+  isPlaying:        boolean;
+  onUploadFile:     (file: File) => void;
+  onBroadcastPlay:  () => void;
+  onBroadcastPause: () => void;
   onStop:           () => void;
   onResumeAudio:    () => void;
 }
@@ -27,18 +33,25 @@ export default function ActiveView({
   isLoading,
   roomCode,
   needsGesture,
+  trackName,
+  downloadProgress,
+  isPlaying,
+  onUploadFile,
+  onBroadcastPlay,
+  onBroadcastPause,
   onStop,
   onResumeAudio,
 }: ActiveViewProps) {
   const isHost      = mode === 'host';
   const accentColor = isHost ? COLORS.neonPurple : COLORS.neonBlue;
   const icon        = isHost ? '📡' : '🎧';
-  const title       = isHost ? 'Broadcasting Audio' : 'Receiving Stream';
+  const title       = isHost ? 'Host Session' : 'Listening Party';
   const subtitle    = isHost
-    ? 'Tab / system audio is being streamed to all clients'
-    : 'Synchronized to host clock · Jitter buffer active';
+    ? 'Upload a track and control playback for all clients'
+    : 'Synchronized perfect 0ms playback';
 
   const [copied, setCopied] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(roomCode).then(() => {
@@ -47,9 +60,15 @@ export default function ActiveView({
     });
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      onUploadFile(file);
+    }
+  };
+
   return (
     <section className="active-view">
-
       {/* ── "Tap to Listen" overlay for mobile autoplay block ── */}
       {needsGesture && (
         <div className="tap-to-listen">
@@ -59,9 +78,9 @@ export default function ActiveView({
             onClick={onResumeAudio}
           >
             <span className="tap-to-listen__icon">🔊</span>
-            <span className="tap-to-listen__label">Tap to Listen</span>
+            <span className="tap-to-listen__label">Tap to Unlock Audio</span>
             <span className="tap-to-listen__sub">
-              Your browser requires a tap to start audio
+              Required by your browser to allow playback
             </span>
           </button>
         </div>
@@ -69,20 +88,12 @@ export default function ActiveView({
 
       {/* Pulsing icon */}
       <div className="active-icon-container">
-        <PulseRing color={accentColor} active={true} />
+        <PulseRing color={accentColor} active={isPlaying} />
         <span className="active-icon">{icon}</span>
       </div>
 
       <h2 className="active-title">{title}</h2>
       <p className="active-subtitle">{subtitle}</p>
-
-      {/* Client status indicator */}
-      {!isHost && !needsGesture && (
-        <div className="listening-badge">
-          <span className="status-dot status-dot--live" />
-          <span>Listening</span>
-        </div>
-      )}
 
       {/* Room code banner (host only) */}
       {isHost && roomCode && (
@@ -103,6 +114,74 @@ export default function ActiveView({
         </div>
       )}
 
+      {/* Track Info & Controls */}
+      <div className="track-controls-card">
+        {isHost ? (
+          <div className="host-controls">
+            {!trackName && (
+              <div className="upload-prompt">
+                <input
+                  type="file"
+                  accept="audio/mpeg,audio/wav,audio/ogg"
+                  onChange={handleFileChange}
+                  style={{ display: 'none' }}
+                  ref={fileInputRef}
+                />
+                <button 
+                  className="primary-button" 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading || connectedClients === 0}
+                >
+                  {isLoading ? 'Uploading...' : connectedClients === 0 ? 'Wait for clients to join...' : '📁 Select Audio File'}
+                </button>
+              </div>
+            )}
+            
+            {trackName && (
+              <div className="track-info">
+                <h3>{trackName}</h3>
+                <div className="progress-bar-container">
+                  <div className="progress-bar-fill" style={{ width: `${downloadProgress}%`, backgroundColor: accentColor }}></div>
+                </div>
+                <p className="progress-text">
+                  {downloadProgress < 100 
+                    ? `Transferring to clients... ${Math.round(downloadProgress)}%` 
+                    : 'Ready to play'}
+                </p>
+                
+                <div className="playback-buttons">
+                  {isPlaying ? (
+                    <button className="primary-button" onClick={onBroadcastPause}>⏸ Pause</button>
+                  ) : (
+                    <button className="primary-button" onClick={onBroadcastPlay} disabled={downloadProgress < 100}>▶ Play Sync</button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="client-controls">
+            {trackName ? (
+              <div className="track-info">
+                <h3>{trackName}</h3>
+                <div className="progress-bar-container">
+                  <div className="progress-bar-fill" style={{ width: `${downloadProgress}%`, backgroundColor: accentColor }}></div>
+                </div>
+                <p className="progress-text">
+                  {downloadProgress < 100 
+                    ? `Downloading track... ${Math.round(downloadProgress)}%` 
+                    : isPlaying ? '🎵 Playing in sync' : 'Waiting for host to play...'}
+                </p>
+              </div>
+            ) : (
+              <div className="waiting-prompt">
+                <p>Waiting for host to select a track...</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Audio visualizer */}
       <AudioVisualizer
         analyserNode={analyserNode}
@@ -119,17 +198,85 @@ export default function ActiveView({
         className="stop-button"
         onClick={onStop}
         disabled={isLoading}
-        aria-label="Stop streaming"
+        aria-label="Stop session"
       >
-        {isLoading ? (
+        {isLoading && !trackName ? (
           <span className="stop-button__loading">
             <span className="spinner" />
             Stopping…
           </span>
         ) : (
-          '■  Stop Streaming'
+          isHost ? '■ End Session' : '■ Leave Room'
         )}
       </button>
+      
+      <style jsx>{`
+        .track-controls-card {
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 16px;
+          padding: 24px;
+          margin-bottom: 24px;
+          width: 100%;
+          text-align: center;
+        }
+        .upload-prompt p {
+          margin-bottom: 16px;
+          color: rgba(255, 255, 255, 0.7);
+        }
+        .primary-button {
+          background: ${accentColor};
+          color: #000;
+          border: none;
+          padding: 12px 24px;
+          border-radius: 8px;
+          font-weight: bold;
+          cursor: pointer;
+          transition: opacity 0.2s, transform 0.2s;
+        }
+        .primary-button:hover:not(:disabled) {
+          opacity: 0.9;
+          transform: scale(1.02);
+        }
+        .primary-button:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .track-info h3 {
+          margin: 0 0 12px 0;
+          font-size: 1.1rem;
+          color: #fff;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .progress-bar-container {
+          height: 8px;
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 4px;
+          overflow: hidden;
+          margin-bottom: 8px;
+        }
+        .progress-bar-fill {
+          height: 100%;
+          transition: width 0.1s linear;
+        }
+        .progress-text {
+          font-size: 0.85rem;
+          color: rgba(255, 255, 255, 0.6);
+          margin: 0 0 16px 0;
+        }
+        .playback-buttons {
+          display: flex;
+          gap: 12px;
+          justify-content: center;
+        }
+        .waiting-prompt p {
+          color: rgba(255, 255, 255, 0.5);
+          margin: 0;
+          font-style: italic;
+        }
+      `}</style>
     </section>
   );
 }

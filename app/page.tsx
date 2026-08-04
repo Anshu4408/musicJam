@@ -10,7 +10,9 @@ import { useAudioEngine } from '@/hooks/useAudioEngine';
 export default function Home() {
   const {
     mode, isLoading, error, stats, connectedClients, analyserNode,
-    roomCode, needsGesture, resumeAudio, startHost, startClient, stop,
+    roomCode, needsGesture, trackName, downloadProgress, isPlaying,
+    uploadFile, broadcastPlay, broadcastPause,
+    startHost, startClient, stop, resumeAudio,
   } = useAudioEngine();
 
   return (
@@ -36,6 +38,12 @@ export default function Home() {
               isLoading={isLoading}
               roomCode={roomCode}
               needsGesture={needsGesture}
+              trackName={trackName}
+              downloadProgress={downloadProgress}
+              isPlaying={isPlaying}
+              onUploadFile={uploadFile}
+              onBroadcastPlay={broadcastPlay}
+              onBroadcastPause={broadcastPause}
               onStop={stop}
               onResumeAudio={resumeAudio}
             />
