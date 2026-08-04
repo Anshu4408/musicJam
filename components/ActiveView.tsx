@@ -13,6 +13,8 @@ interface ActiveViewProps {
   roomCode:            string;
   needsGesture:        boolean;
   trackName:           string | null;
+  trackDuration:       number;
+  playbackPosition:    number;
   downloadProgress:    number;
   isPlaying:           boolean;
   libraryTracks:       string[];
@@ -21,6 +23,7 @@ interface ActiveViewProps {
   onDeleteFromLibrary: (name: string) => void;
   onBroadcastPlay:     () => void;
   onBroadcastPause:    () => void;
+  onBroadcastSeek:     (time: number) => void;
   onStop:              () => void;
   onResumeAudio:       () => void;
 }
@@ -33,6 +36,8 @@ export default function ActiveView({
   roomCode,
   needsGesture,
   trackName,
+  trackDuration,
+  playbackPosition,
   downloadProgress,
   isPlaying,
   libraryTracks,
@@ -41,6 +46,7 @@ export default function ActiveView({
   onDeleteFromLibrary,
   onBroadcastPlay,
   onBroadcastPause,
+  onBroadcastSeek,
   onStop,
   onResumeAudio,
 }: ActiveViewProps) {
@@ -58,6 +64,13 @@ export default function ActiveView({
     if (file) {
       onUploadFile(file);
     }
+  };
+
+  const formatTime = (seconds: number) => {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
   return (
@@ -181,10 +194,31 @@ export default function ActiveView({
       {/* Fixed Bottom Player */}
       <div className="bottom-player">
         <div className="player-progress-bar-wrapper">
-          <div 
-            className="player-progress-fill" 
-            style={{ width: `${downloadProgress}%`, backgroundColor: downloadProgress < 100 ? 'var(--text-muted)' : 'var(--text-primary)' }} 
-          />
+          {downloadProgress < 100 && trackName ? (
+            <div 
+              className="player-progress-fill" 
+              style={{ width: `${downloadProgress}%`, backgroundColor: 'var(--text-muted)' }} 
+            />
+          ) : (
+            <div className="seek-bar-container">
+              <span className="time-label">{formatTime(playbackPosition)}</span>
+              <input 
+                type="range"
+                className="seek-slider"
+                min={0}
+                max={trackDuration || 100}
+                step={0.1}
+                value={Math.min(playbackPosition, trackDuration || 100)}
+                onChange={(e) => {
+                  if (isHost && trackDuration) {
+                    onBroadcastSeek(parseFloat(e.target.value));
+                  }
+                }}
+                disabled={!isHost || !trackName || downloadProgress < 100}
+              />
+              <span className="time-label">{formatTime(trackDuration)}</span>
+            </div>
+          )}
         </div>
 
         <div className="player-now-playing">

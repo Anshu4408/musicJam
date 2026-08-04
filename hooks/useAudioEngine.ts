@@ -82,6 +82,8 @@ export function useAudioEngine() {
   const isPlayingRef                            = useRef(false);
   const [trackName, setTrackName]               = useState<string | null>(null);
   const trackNameRef                            = useRef<string | null>(null);
+  const [trackDuration, setTrackDuration]       = useState(0);
+  const [playbackPosition, setPlaybackPosition] = useState(0);
 
   const peerRef          = useRef<any>(null);
   const audioCtxRef      = useRef<AudioContext | null>(null);
@@ -231,6 +233,22 @@ export function useAudioEngine() {
     isPlayingRef.current = false;
   }, []);
 
+  // Update playback position for UI
+  useEffect(() => {
+    let rafId: number;
+    const updatePosition = () => {
+      if (isPlayingRef.current && audioCtxRef.current) {
+        const timePlayed = audioCtxRef.current.currentTime - playbackStartCtxTimeRef.current;
+        setPlaybackPosition(playbackStartOffsetRef.current + timePlayed);
+      } else if (!isPlayingRef.current) {
+        setPlaybackPosition(playbackStartOffsetRef.current);
+      }
+      rafId = requestAnimationFrame(updatePosition);
+    };
+    rafId = requestAnimationFrame(updatePosition);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
+
   // ── HOST ──────────────────────────────────────────────────────────────────
 
   const sendFileToConnection = async (conn: any, name: string, arrayBuffer: ArrayBuffer) => {
@@ -338,6 +356,9 @@ export function useAudioEngine() {
     }
     setTrackName(name);
     trackNameRef.current = name;
+    if (audioBufferRef.current) {
+      setTrackDuration(audioBufferRef.current.duration);
+    }
     setDownloadProgress(100);
     playbackStartCtxTimeRef.current = 0;
     playbackStartOffsetRef.current = 0;
@@ -397,11 +418,25 @@ export function useAudioEngine() {
 
   const broadcastPause = useCallback(() => {
     stopPlayback(); // Update our local seek pos
-    const currentSeek = playbackStartOffsetRef.current;
     const conns = Array.from(clientConnsRef.current.values());
-    conns.forEach(c => c.send({ type: 'pause', seekPos: currentSeek }));
+    conns.forEach(c => c.send({ type: 'pause', seekPos: playbackStartOffsetRef.current }));
   }, [stopPlayback]);
 
+  // Host: Broadcast Seek
+  const broadcastSeek = useCallback((time: number) => {
+    playbackStartOffsetRef.current = time;
+    const ntpTime = performance.now();
+    const conns = Array.from(clientConnsRef.current.values());
+
+    if (isPlayingRef.current) {
+      stopPlayback();
+      startPlaybackAt(ntpTime, time);
+      conns.forEach(c => c.send({ type: 'play', startNtp: ntpTime, seekPos: time }));
+    } else {
+      conns.forEach(c => c.send({ type: 'pause', seekPos: time }));
+      setPlaybackPosition(time);
+    }
+  }, [stopPlayback, startPlaybackAt]);
 
   // ── CLIENT ────────────────────────────────────────────────────────────────
 
@@ -507,6 +542,7 @@ export function useAudioEngine() {
           if (savedTrack) {
             setDownloadProgress(100);
             audioBufferRef.current = await ctx.decodeAudioData(savedTrack.data.slice(0));
+            setTrackDuration(audioBufferRef.current.duration);
             
             // If the host is currently playing, jump right in
             if (msg.isPlaying) {
@@ -545,6 +581,7 @@ export function useAudioEngine() {
             setLibraryTracks(prev => Array.from(new Set([...prev, receivingTrackName])));
             
             audioBufferRef.current = await ctx.decodeAudioData(fullBuffer.buffer);
+            setTrackDuration(audioBufferRef.current.duration);
             
             // Apply pending welcome state if we missed it while downloading
             if (pendingWelcomeState && pendingWelcomeState.isPlaying) {
@@ -619,8 +656,9 @@ export function useAudioEngine() {
     mode, isLoading, error, stats,
     connectedClients, analyserNode,
     roomCode, needsGesture,
-    trackName, downloadProgress, isPlaying, libraryTracks,
-    uploadFile, loadFromLibrary, deleteFromLibrary, broadcastPlay, broadcastPause,
+    trackName, trackDuration, playbackPosition, downloadProgress, isPlaying, libraryTracks,
+    uploadFile, loadFromLibrary, deleteFromLibrary,
+    broadcastPlay, broadcastPause, broadcastSeek,
     startHost, startClient, stop, resumeAudio,
   };
 }
