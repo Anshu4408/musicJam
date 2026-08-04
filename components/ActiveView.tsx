@@ -8,7 +8,7 @@ interface ActiveViewProps {
   mode:                AppMode;
   stats:               EngineStats | null;
   connectedClients:    number;
-  analyserNode:        AnalyserNode | null;
+  analyserNode:        AnalyserNode | null; // not used in minimal theme
   isLoading:           boolean;
   roomCode:            string;
   needsGesture:        boolean;
@@ -29,7 +29,6 @@ export default function ActiveView({
   mode,
   stats,
   connectedClients,
-  analyserNode,
   isLoading,
   roomCode,
   needsGesture,
@@ -67,81 +66,37 @@ export default function ActiveView({
       {needsGesture && (
         <div className="gesture-overlay">
           <div className="gesture-modal">
-            <div className="gesture-icon">🔊</div>
-            <h2>Tap to Play</h2>
-            <p>Your browser paused the audio. Tap below to instantly sync.</p>
-            <button className="btn-primary large" onClick={onResumeAudio}>
-              Resume Audio
+            <h2>Playback Paused</h2>
+            <p>Tap below to instantly resync audio playback with the host.</p>
+            <button className="btn-accent" onClick={onResumeAudio}>
+              Resume Sync
             </button>
           </div>
         </div>
       )}
 
-      {/* Main UI */}
+      {/* Main View Area (Library) */}
       <div className="view-header">
-        <div className="session-info">
-          <h2>{isHost ? 'Host Session' : 'Listening Party'}</h2>
+        <div>
+          <h2 className="session-title">{isHost ? 'Your Library' : 'Listening Party'}</h2>
           {isHost && (
-            <p className="room-code">
-              Room Code: <strong>{roomCode}</strong>
-              <span className="client-count"> • {connectedClients} listening</span>
-            </p>
+            <div className="room-badge">
+              Room Code: <span>{roomCode}</span>
+            </div>
           )}
         </div>
-        <button className="btn-icon" onClick={() => setShowStats(!showStats)} title="Toggle Stats">
-          ℹ️
-        </button>
       </div>
 
-      <div className="content-grid">
-        {/* Left Column: Player */}
-        <div className="player-section card">
-          <div className="album-art-placeholder">
-            <div className={`art-pulse ${isPlaying ? 'playing' : ''}`}>🎵</div>
-          </div>
-          
-          <div className="track-details">
-            <h3>{trackName || 'No track selected'}</h3>
-            <p className="artist-name">{trackName ? 'High-Fidelity Audio' : 'Awaiting selection...'}</p>
-          </div>
-
-          <div className="progress-container">
-            <div className="progress-bar">
-              <div 
-                className="progress-fill" 
-                style={{ width: `${downloadProgress}%`, background: downloadProgress < 100 ? '#555' : '#fff' }} 
-              />
-            </div>
-            <div className="progress-labels">
-              <span>{downloadProgress < 100 && trackName ? `Downloading ${Math.round(downloadProgress)}%` : '0:00'}</span>
-              <span>{trackName && downloadProgress === 100 ? 'Ready' : ''}</span>
-            </div>
-          </div>
-
-          {isHost ? (
-            <div className="controls">
+      <div className="library-section">
+        {isHost ? (
+          <>
+            <div className="library-toolbar">
               <button 
-                className="btn-play-pause" 
-                onClick={isPlaying ? onBroadcastPause : onBroadcastPlay}
-                disabled={!trackName || downloadProgress < 100}
+                className="btn-upload" 
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isLoading}
               >
-                {isPlaying ? '⏸' : '▶'}
-              </button>
-            </div>
-          ) : (
-            <div className="client-status">
-              {isPlaying ? 'Synchronized perfectly 🎧' : 'Waiting for host to play...'}
-            </div>
-          )}
-        </div>
-
-        {/* Right Column: Library (Host Only) */}
-        {isHost && (
-          <div className="library-section card">
-            <div className="library-header">
-              <h3>My Library</h3>
-              <button className="btn-secondary small" onClick={() => fileInputRef.current?.click()}>
-                + Upload
+                {isLoading ? 'Uploading...' : 'Upload Music'}
               </button>
               <input
                 type="file"
@@ -150,47 +105,112 @@ export default function ActiveView({
                 style={{ display: 'none' }}
                 ref={fileInputRef}
               />
+              <div className="search-box">
+                <span className="search-icon">🔍</span>
+                <input 
+                  type="text" 
+                  placeholder="Find in library" 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
             </div>
 
-            <div className="search-box">
-              <span className="search-icon">🔍</span>
-              <input 
-                type="text" 
-                placeholder="Search tracks..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-
-            <ul className="library-list">
+            <div className="track-list">
               {filteredLibrary.length === 0 ? (
-                <li className="empty-state">No tracks found. Upload some music!</li>
+                <div className="empty-state">
+                  <h3>No tracks found</h3>
+                  <p>Upload audio files to add them to your library.</p>
+                </div>
               ) : (
-                filteredLibrary.map(t => (
-                  <li key={t} className={`library-item ${t === trackName ? 'active' : ''}`}>
-                    <button className="track-btn" onClick={() => onLoadFromLibrary(t)}>
-                      <span className="track-icon">{t === trackName && isPlaying ? '🔊' : '🎵'}</span>
-                      <span className="track-title">{t}</span>
+                filteredLibrary.map((t, index) => (
+                  <div key={t} className={`track-item ${t === trackName ? 'active' : ''}`} onClick={() => onLoadFromLibrary(t)}>
+                    <div className="track-number">{index + 1}</div>
+                    <div className="track-info-col">
+                      <div className="track-title">{t}</div>
+                      <div className="track-artist">High-Fidelity Audio</div>
+                    </div>
+                    {/* Stop event bubbling so clicking delete doesn't trigger load */}
+                    <button 
+                      className="btn-delete" 
+                      onClick={(e) => { e.stopPropagation(); onDeleteFromLibrary(t); }}
+                      title="Delete from Library"
+                    >
+                      ✕
                     </button>
-                    <button className="delete-btn" onClick={() => onDeleteFromLibrary(t)}>✕</button>
-                  </li>
+                  </div>
                 ))
               )}
-            </ul>
+            </div>
+          </>
+        ) : (
+          <div className="empty-state" style={{ marginTop: '40px' }}>
+            <h3>Connected as Client</h3>
+            <p>Waiting for the host to select and play music...</p>
+            <p style={{ marginTop: '16px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+              ({libraryTracks.length} tracks cached locally)
+            </p>
           </div>
         )}
       </div>
 
-      {showStats && (
-        <div className="stats-wrapper">
-          <StatsPanel stats={stats} mode={mode} connectedClients={connectedClients} />
+      {/* Fixed Bottom Player */}
+      <div className="bottom-player">
+        <div className="player-progress-bar-wrapper">
+          <div 
+            className="player-progress-fill" 
+            style={{ width: `${downloadProgress}%`, backgroundColor: downloadProgress < 100 ? 'var(--text-muted)' : 'var(--text-primary)' }} 
+          />
         </div>
+
+        <div className="player-now-playing">
+          <div className="player-art">
+            {isPlaying ? '🔊' : '🎵'}
+          </div>
+          <div className="player-track-info">
+            <div className="player-track-title">{trackName || 'No track selected'}</div>
+            <div className="player-track-artist">
+              {downloadProgress < 100 && trackName ? `Downloading ${Math.round(downloadProgress)}%` : (trackName ? 'High-Fidelity Audio' : '—')}
+            </div>
+          </div>
+        </div>
+
+        <div className="player-controls">
+          {isHost ? (
+            <button 
+              className="btn-circle" 
+              onClick={isPlaying ? onBroadcastPause : onBroadcastPlay}
+              disabled={!trackName || downloadProgress < 100}
+            >
+              {isPlaying ? '⏸' : '▶'}
+            </button>
+          ) : (
+            <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+              {isPlaying ? 'Synced' : 'Waiting'}
+            </div>
+          )}
+        </div>
+
+        <div className="player-right">
+          {/* Info Button for Stats */}
+          <button className="btn-icon-subtle" onClick={() => setShowStats(true)} title="View Diagnostics">
+            ℹ️
+          </button>
+          <button className="btn-icon-subtle" onClick={onStop} title="Leave Room" style={{ marginLeft: '12px', color: '#ff4444' }}>
+            ✕
+          </button>
+        </div>
+      </div>
+
+      {/* Stats Modal */}
+      {showStats && (
+        <StatsPanel 
+          stats={stats} 
+          mode={mode} 
+          connectedClients={connectedClients} 
+          onClose={() => setShowStats(false)} 
+        />
       )}
-
-      <button className="btn-danger stop-btn" onClick={onStop}>
-        End Session
-      </button>
-
     </section>
   );
 }

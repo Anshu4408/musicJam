@@ -16,22 +16,16 @@ export default function SelectionView({ onStartHost, onStartClient, isLoading }:
       <h1>MusicJAM</h1>
       <p>Zero-lag synchronized audio streaming. Listen together perfectly.</p>
 
-      <div className="action-cards">
+      <div className="action-stack">
         <div className="action-card" onClick={isLoading ? undefined : onStartHost}>
-          <div className="card-icon">📡</div>
-          <h3>Start Hosting</h3>
-          <p>Create a room and stream your library to others.</p>
+          <h3>Host a Party</h3>
+          <p>Create a room and stream your library in perfect sync.</p>
+          <button className="btn-primary" disabled={isLoading}>Start Hosting</button>
         </div>
 
-        <div className="action-card" onClick={(e) => {
-          // Only trigger if clicking the card background, not the input itself
-          if ((e.target as HTMLElement).tagName !== 'INPUT' && code.length === 6) {
-            onStartClient(code);
-          }
-        }}>
-          <div className="card-icon">🎧</div>
-          <h3>Join Room</h3>
-          <p>Enter a 6-letter room code to listen in.</p>
+        <div className="action-card">
+          <h3>Join a Party</h3>
+          <p>Enter a 6-letter code to listen in.</p>
           <input
             className="join-input"
             type="text"
