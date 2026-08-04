@@ -40,16 +40,14 @@ export default function SelectionView({ onStartHost, onStartClient, isLoading }:
             }}
             disabled={isLoading}
           />
-          {code.length === 6 && (
-            <button 
-              className="btn-primary" 
-              style={{ width: '100%', marginTop: '16px' }}
-              onClick={() => onStartClient(code)}
-              disabled={isLoading}
-            >
-              Join Now
-            </button>
-          )}
+          <button 
+            className="btn-primary" 
+            style={{ width: '100%', marginTop: '16px' }}
+            onClick={() => onStartClient(code)}
+            disabled={isLoading || code.length !== 6}
+          >
+            Join Now
+          </button>
         </div>
       </div>
     </section>
