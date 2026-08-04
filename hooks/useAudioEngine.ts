@@ -79,7 +79,9 @@ export function useAudioEngine() {
   const [libraryTracks, setLibraryTracks]       = useState<string[]>([]);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isPlaying, setIsPlaying]               = useState(false);
+  const isPlayingRef                            = useRef(false);
   const [trackName, setTrackName]               = useState<string | null>(null);
+  const trackNameRef                            = useRef<string | null>(null);
 
   const peerRef          = useRef<any>(null);
   const audioCtxRef      = useRef<AudioContext | null>(null);
@@ -213,6 +215,7 @@ export function useAudioEngine() {
     source.start(startCtxTime, actualSeek);
     sourceNodeRef.current = source;
     setIsPlaying(true);
+    isPlayingRef.current = true;
   }, [analyserNode]);
 
   const stopPlayback = useCallback(() => {
@@ -225,6 +228,7 @@ export function useAudioEngine() {
       sourceNodeRef.current = null;
     }
     setIsPlaying(false);
+    isPlayingRef.current = false;
   }, []);
 
   // ── HOST ──────────────────────────────────────────────────────────────────
@@ -275,14 +279,16 @@ export function useAudioEngine() {
           setConnectedClients(clientConnsRef.current.size);
 
           // 1. Send Welcome Message (Handshake)
-          const currentSeek = isPlaying && audioCtxRef.current 
+          const currentIsPlaying = isPlayingRef.current;
+          const currentTrack = trackNameRef.current;
+          const currentSeek = currentIsPlaying && audioCtxRef.current 
             ? playbackStartOffsetRef.current + (audioCtxRef.current.currentTime - playbackStartCtxTimeRef.current)
             : playbackStartOffsetRef.current;
           
           dataConn.send({
             type: 'welcome',
-            trackName: trackName,
-            isPlaying: isPlaying,
+            trackName: currentTrack,
+            isPlaying: currentIsPlaying,
             seekPos: currentSeek,
             startNtp: performance.now(),
           });
@@ -295,11 +301,11 @@ export function useAudioEngine() {
                 hostTs: performance.now(),
                 clientTs: msg.clientTs,
               });
-            } else if (msg?.type === 'request_file' && trackName) {
+            } else if (msg?.type === 'request_file' && trackNameRef.current) {
               // 2. Client doesn't have the file, send it specifically to them
-              const track = await getTrackFromDb(trackName);
+              const track = await getTrackFromDb(trackNameRef.current);
               if (track) {
-                await sendFileToConnection(dataConn, trackName, track.data);
+                await sendFileToConnection(dataConn, trackNameRef.current, track.data);
               }
             }
           });
@@ -331,10 +337,11 @@ export function useAudioEngine() {
       audioBufferRef.current = await ctx.decodeAudioData(arrayBuffer.slice(0));
     }
     setTrackName(name);
+    trackNameRef.current = name;
     setDownloadProgress(100);
     playbackStartCtxTimeRef.current = 0;
     playbackStartOffsetRef.current = 0;
-    if (isPlaying) stopPlayback();
+    if (isPlayingRef.current) stopPlayback();
   };
 
   // Host: Load from Library
