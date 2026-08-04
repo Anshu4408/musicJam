@@ -310,12 +310,12 @@ export function useAudioEngine() {
     audioElRef.current = audio;
 
     // Kick a silent play so mobile browsers "unlock" this element
-    try { await audio.play(); } catch {}
+    audio.play().catch(() => {});
 
     // AudioContext for analyser only
     const ctx = new AudioContext();
     audioCtxRef.current = ctx;
-    try { await ctx.resume(); } catch {}
+    ctx.resume().catch(() => {});
 
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
