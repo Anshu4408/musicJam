@@ -83,7 +83,6 @@ export function useAudioEngine() {
   const [trackName, setTrackName]               = useState<string | null>(null);
   const trackNameRef                            = useRef<string | null>(null);
   const [trackDuration, setTrackDuration]       = useState(0);
-  const [playbackPosition, setPlaybackPosition] = useState(0);
 
   const peerRef          = useRef<any>(null);
   const audioCtxRef      = useRef<AudioContext | null>(null);
@@ -233,20 +232,12 @@ export function useAudioEngine() {
     isPlayingRef.current = false;
   }, []);
 
-  // Update playback position for UI
-  useEffect(() => {
-    let rafId: number;
-    const updatePosition = () => {
-      if (isPlayingRef.current && audioCtxRef.current) {
-        const timePlayed = audioCtxRef.current.currentTime - playbackStartCtxTimeRef.current;
-        setPlaybackPosition(playbackStartOffsetRef.current + timePlayed);
-      } else if (!isPlayingRef.current) {
-        setPlaybackPosition(playbackStartOffsetRef.current);
-      }
-      rafId = requestAnimationFrame(updatePosition);
-    };
-    rafId = requestAnimationFrame(updatePosition);
-    return () => cancelAnimationFrame(rafId);
+  // Expose current position without triggering React re-renders
+  const getPlaybackPosition = useCallback(() => {
+    if (isPlayingRef.current && audioCtxRef.current) {
+      return playbackStartOffsetRef.current + (audioCtxRef.current.currentTime - playbackStartCtxTimeRef.current);
+    }
+    return playbackStartOffsetRef.current;
   }, []);
 
   // ── HOST ──────────────────────────────────────────────────────────────────
@@ -437,7 +428,6 @@ export function useAudioEngine() {
       conns.forEach(c => c.send({ type: 'play', startNtp: ntpTime, seekPos: time }));
     } else {
       conns.forEach(c => c.send({ type: 'pause', seekPos: time }));
-      setPlaybackPosition(time);
     }
   }, [stopPlayback, startPlaybackAt]);
 
@@ -667,7 +657,7 @@ export function useAudioEngine() {
     mode, isLoading, error, stats,
     connectedClients, analyserNode,
     roomCode, needsGesture,
-    trackName, trackDuration, playbackPosition, downloadProgress, isPlaying, libraryTracks,
+    trackName, trackDuration, getPlaybackPosition, downloadProgress, isPlaying, libraryTracks,
     uploadFile, loadFromLibrary, deleteFromLibrary,
     broadcastPlay, broadcastPause, broadcastSeek,
     startHost, startClient, stop, resumeAudio,

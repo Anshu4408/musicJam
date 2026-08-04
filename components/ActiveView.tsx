@@ -14,7 +14,7 @@ interface ActiveViewProps {
   needsGesture:        boolean;
   trackName:           string | null;
   trackDuration:       number;
-  playbackPosition:    number;
+  getPlaybackPosition: () => number;
   downloadProgress:    number;
   isPlaying:           boolean;
   libraryTracks:       string[];
@@ -37,7 +37,7 @@ export default function ActiveView({
   needsGesture,
   trackName,
   trackDuration,
-  playbackPosition,
+  getPlaybackPosition,
   downloadProgress,
   isPlaying,
   libraryTracks,
@@ -54,6 +54,25 @@ export default function ActiveView({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showStats, setShowStats] = useState(false);
+
+  // Refs for high-frequency progress bar updates without React re-renders
+  const progressInputRef = useRef<HTMLInputElement>(null);
+  const progressTimeRef = useRef<HTMLSpanElement>(null);
+  const isDraggingRef = useRef(false);
+
+  React.useEffect(() => {
+    let rafId: number;
+    const updateProgressUI = () => {
+      if (!isDraggingRef.current && progressInputRef.current && progressTimeRef.current) {
+        const pos = getPlaybackPosition();
+        progressInputRef.current.value = pos.toString();
+        progressTimeRef.current.innerText = formatTime(pos);
+      }
+      rafId = requestAnimationFrame(updateProgressUI);
+    };
+    rafId = requestAnimationFrame(updateProgressUI);
+    return () => cancelAnimationFrame(rafId);
+  }, [getPlaybackPosition]);
 
   const filteredLibrary = useMemo(() => {
     return libraryTracks.filter(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -201,17 +220,25 @@ export default function ActiveView({
             />
           ) : (
             <div className="seek-bar-container">
-              <span className="time-label">{formatTime(playbackPosition)}</span>
+              <span className="time-label" ref={progressTimeRef}>0:00</span>
               <input 
+                ref={progressInputRef}
                 type="range"
                 className="seek-slider"
                 min={0}
                 max={trackDuration || 100}
                 step={0.1}
-                value={Math.min(playbackPosition, trackDuration || 100)}
-                onChange={(e) => {
+                defaultValue={0}
+                onPointerDown={() => { isDraggingRef.current = true; }}
+                onPointerUp={(e) => { 
+                  isDraggingRef.current = false;
                   if (isHost && trackDuration) {
-                    onBroadcastSeek(parseFloat(e.target.value));
+                    onBroadcastSeek(parseFloat(e.currentTarget.value));
+                  }
+                }}
+                onChange={(e) => {
+                  if (progressTimeRef.current) {
+                    progressTimeRef.current.innerText = formatTime(parseFloat(e.target.value));
                   }
                 }}
                 disabled={!isHost || !trackName || downloadProgress < 100}
