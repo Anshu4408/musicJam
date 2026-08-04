@@ -255,6 +255,9 @@ export function useAudioEngine() {
     conn.send({ type: 'file_start', name, size: arrayBuffer.byteLength });
     let offset = 0;
     while (offset < arrayBuffer.byteLength) {
+      // Abort if the host switched to a different track before the transfer finished
+      if (trackNameRef.current !== name) return;
+
       const chunk = arrayBuffer.slice(offset, offset + CHUNK_SIZE);
       conn.send({ type: 'file_chunk', data: chunk });
       offset += CHUNK_SIZE;
@@ -497,6 +500,7 @@ export function useAudioEngine() {
       let expectedSize = 0;
       let receivedSize = 0;
       let receivingTrackName = '';
+      let lastProgressUpdate = 0;
 
       // Late-joiner sync state
       let pendingWelcomeState: { isPlaying: boolean, startNtp: number, seekPos: number } | null = null;
@@ -562,11 +566,18 @@ export function useAudioEngine() {
           expectedSize = msg.size;
           receivingTrackName = msg.name;
           setDownloadProgress(0);
+          lastProgressUpdate = performance.now();
         } else if (msg?.type === 'file_chunk') {
           chunks.push(msg.data);
           receivedSize += msg.data.byteLength;
-          setDownloadProgress((receivedSize / expectedSize) * 100);
+          
+          const now = performance.now();
+          if (now - lastProgressUpdate > 100) {
+            setDownloadProgress((receivedSize / expectedSize) * 100);
+            lastProgressUpdate = now;
+          }
         } else if (msg?.type === 'file_end') {
+          setDownloadProgress(100);
           const fullBuffer = new Uint8Array(expectedSize);
           let offset = 0;
           for (const chunk of chunks) {
