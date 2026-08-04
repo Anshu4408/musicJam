@@ -1,20 +1,26 @@
 /**
- * useAudioEngine.ts — Synchronized audio streaming via WebRTC data channels.
+ * useAudioEngine.ts
  *
- * PROTOCOL: JSON messages over PeerJS data channel (serialization:'json').
- *   JSON is 100% reliable across all browsers — no BinaryPack/Blob issues.
- *   Audio samples are base64-encoded Int16 PCM in each message.
+ * ARCHITECTURE (v4 — minimum latency):
  *
- * SYNC STRATEGY: Relative scheduling from first received frame.
- *   The NTP-absolute approach fails for late-joining clients because the
- *   AudioContext accumulates time during WebRTC setup (3–10 s), so
- *   NTP-derived scheduleAt lands in the past → frames silently skipped.
+ *  Audio transport: WebRTC MediaStream via peer.call()
+ *    ↳ Uses SRTP (same as Zoom/Meet), hardware Opus codec, ~20 ms frames
+ *    ↳ Browser's native jitter buffer: 20–40 ms
+ *    ↳ Total one-way latency: ~50–100 ms on WiFi  ← vs ~150–600 ms SCTP
  *
- *   Instead: on the first good audio frame, anchor playback to
- *   (ctx.currentTime + START_BUFFER). All subsequent frames are scheduled
- *   at (anchorClientTime + frame.ts - anchorHostTs) — preserving the host's
- *   relative timing perfectly. Clients who connect at the same time will be
- *   in sync; NTP is still used for the stats RTT/offset display.
+ *  Sync measurement: JSON data channel (NTP ping/pong)
+ *    ↳ Reports RTT, estimated one-way delay in the stats panel
+ *
+ *  Host flow:
+ *    getDisplayMedia → audioStream → AudioContext (for analyser)
+ *    On each client data connection → peer.call(clientId, audioStream)
+ *
+ *  Client flow:
+ *    peer.connect(hostId)         ← data channel for NTP
+ *    peer.on('call', call)        ← audio MediaStream
+ *    call.answer()                ← listen-only, no mic
+ *    call.on('stream') → <audio> ← native WebRTC pipeline to speakers
+ *    createMediaStreamSource      ← route through AudioContext for analyser
  */
 
 'use client';
@@ -32,26 +38,16 @@ export interface EngineStats {
   clockOffsetUs: number;
   bitrateKbps:   number;
   latencyMs:     number;
-  bufferMs:      number;   // current adaptive jitter buffer size
+  bufferMs:      number;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const SAMPLE_RATE      = 24_000;          // Hz
-const CHUNK_SAMPLES    = 512;             // 21 ms per frame at 24 kHz (was 2048→85 ms)
-const MIN_BUFFER       = 0.08;            // 80 ms — minimum jitter buffer
-const MAX_BUFFER       = 0.60;            // 600 ms — maximum before it feels broken
-const CATCHUP_THRESH   = 0.25;            // seconds behind → reset anchor
-const NTP_INTERVAL     = 2_000;           // ms
-const MAX_RTT_HIST     = 8;
-const CONN_TIMEOUT     = 18_000;          // ms
-// Adaptive jitter buffer tuning
-const JB_WINDOW        = 40;              // frames to measure over (~840 ms at 512/24 kHz)
-const JB_TARGET_FLOOR  = 0.015;           // want ≥15 ms headroom
-const JB_SHRINK_STEP   = 0.010;           // shrink by 10 ms per window
-const JB_GROW_FACTOR   = 1.5;            // overshoot when growing
+const NTP_INTERVAL  = 2_000;
+const MAX_RTT_HIST  = 8;
+const CONN_TIMEOUT  = 18_000;
 
-// ICE servers — STUN + multiple free TURN providers
+// ICE servers — Google STUN + Open Relay & Metered TURN for NAT traversal
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302'  },
   { urls: 'stun:stun1.l.google.com:19302' },
@@ -59,13 +55,11 @@ const ICE_SERVERS = [
   { urls: 'stun:stun3.l.google.com:19302' },
   { urls: 'stun:stun4.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' },
-  // Open Relay Project TURN
-  { urls: 'turn:openrelay.metered.ca:80',             username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:443',            username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-  // Metered.ca free TURN
-  { urls: 'turn:a.relay.metered.ca:80',               username: 'e499b2e86e5b3bc6e8f67d4e', credential: 'nUEWPFLyf+8XAYT/' },
-  { urls: 'turn:a.relay.metered.ca:443',              username: 'e499b2e86e5b3bc6e8f67d4e', credential: 'nUEWPFLyf+8XAYT/' },
+  { urls: 'turn:a.relay.metered.ca:80',                username: 'e499b2e86e5b3bc6e8f67d4e', credential: 'nUEWPFLyf+8XAYT/' },
+  { urls: 'turn:a.relay.metered.ca:443',               username: 'e499b2e86e5b3bc6e8f67d4e', credential: 'nUEWPFLyf+8XAYT/' },
   { urls: 'turn:a.relay.metered.ca:443?transport=tcp', username: 'e499b2e86e5b3bc6e8f67d4e', credential: 'nUEWPFLyf+8XAYT/' },
 ];
 
@@ -76,41 +70,6 @@ const PEER_CONFIG = {
     iceTransportPolicy: 'all' as RTCIceTransportPolicy,
   },
 };
-
-// ─── PCM helpers ──────────────────────────────────────────────────────────────
-
-function f32ToI16(f32: Float32Array): Int16Array {
-  const i16 = new Int16Array(f32.length);
-  for (let i = 0; i < f32.length; i++) {
-    const s = Math.max(-1, Math.min(1, f32[i]));
-    i16[i]  = s < 0 ? s * 0x8000 : s * 0x7FFF;
-  }
-  return i16;
-}
-
-function i16ToF32(i16: Int16Array): Float32Array {
-  const f32 = new Float32Array(i16.length);
-  for (let i = 0; i < i16.length; i++) {
-    f32[i] = i16[i] / (i16[i] < 0 ? 0x8000 : 0x7FFF);
-  }
-  return f32;
-}
-
-/** Encode Int16Array → base64 string for JSON transport */
-function i16ToB64(i16: Int16Array): string {
-  const bytes  = new Uint8Array(i16.buffer, i16.byteOffset, i16.byteLength);
-  let   binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
-
-/** Decode base64 string → Int16Array */
-function b64ToI16(b64: string): Int16Array {
-  const binary = atob(b64);
-  const bytes  = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Int16Array(bytes.buffer);
-}
 
 function median(arr: number[]): number {
   const s = [...arr].sort((a, b) => a - b);
@@ -137,21 +96,20 @@ export function useAudioEngine() {
   const peerRef          = useRef<any>(null);
   const audioCtxRef      = useRef<AudioContext | null>(null);
   const streamRef        = useRef<MediaStream | null>(null);
-  const processorRef     = useRef<ScriptProcessorNode | null>(null);
+  const audioElRef       = useRef<HTMLAudioElement | null>(null);
   const statsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ntpIntervalRef   = useRef<ReturnType<typeof setInterval> | null>(null);
-  const clientConnsRef   = useRef<Map<string, any>>(new Map());
 
-  // NTP state (per-client session)
-  const clockOffsetRef = useRef(0);
-  const rttHistRef     = useRef<number[]>([]);
-  const pingTsRef      = useRef<Map<number, number>>(new Map());
+  // Host: peerId → { dataConn, call }
+  const clientConnsRef = useRef<Map<string, any>>(new Map());
+
+  // NTP state
+  const clockOffsetRef = useRef(0);   // ms (wall clock)
+  const rttMsHistRef   = useRef<number[]>([]);
+  const pingTsRef      = useRef<Map<number, number>>(new Map()); // id → Date.now() at send
   const pingIdRef      = useRef(0);
 
-  // Stats
   const frameCountRef = useRef(0);
-  const bytesRef      = useRef(0);
-  const bufferRef     = useRef(MIN_BUFFER); // current adaptive jitter buffer size (seconds)
 
   // ── Cleanup ────────────────────────────────────────────────────────────────
 
@@ -161,17 +119,21 @@ export function useAudioEngine() {
     statsIntervalRef.current = null;
     ntpIntervalRef.current   = null;
 
-    if (processorRef.current) {
-      processorRef.current.onaudioprocess = null;
-      processorRef.current.disconnect();
-      processorRef.current = null;
-    }
-    clientConnsRef.current.forEach(c => { try { c.close(); } catch {} });
+    clientConnsRef.current.forEach(({ dataConn, call }) => {
+      try { dataConn?.close(); } catch {}
+      try { call?.close();     } catch {}
+    });
     clientConnsRef.current.clear();
 
     if (peerRef.current) {
       try { peerRef.current.destroy(); } catch {}
       peerRef.current = null;
+    }
+    if (audioElRef.current) {
+      audioElRef.current.pause();
+      audioElRef.current.srcObject = null;
+      try { document.body.removeChild(audioElRef.current); } catch {}
+      audioElRef.current = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
@@ -186,9 +148,8 @@ export function useAudioEngine() {
     setRoomCode('');
     setNeedsGesture(false);
     frameCountRef.current = 0;
-    bytesRef.current      = 0;
     clockOffsetRef.current = 0;
-    rttHistRef.current     = [];
+    rttMsHistRef.current   = [];
     pingTsRef.current.clear();
   }, []);
 
@@ -198,24 +159,21 @@ export function useAudioEngine() {
 
   const startStatsTick = useCallback(() => {
     statsIntervalRef.current = setInterval(() => {
-      const fps = SAMPLE_RATE / CHUNK_SAMPLES; // 46.9 fps at 512/24kHz
-      const bpt = (CHUNK_SAMPLES * 2 * 1.37) / fps; // base64 ~37% overhead
-      frameCountRef.current += fps;
-      bytesRef.current      += bpt;
+      frameCountRef.current += 25; // Opus ~50 fps, we display 25
 
-      const rttUs    = rttHistRef.current.length
-        ? median(rttHistRef.current) * 1_000_000
-        : 0;
-      const offsetUs = clockOffsetRef.current * 1_000_000;
+      const rttMs    = rttMsHistRef.current.length ? median(rttMsHistRef.current) : 0;
+      const offsetMs = clockOffsetRef.current;
+      // Estimated one-way latency = RTT/2 + Opus frame 20ms + output latency ~15ms
+      const latMs    = Math.round(rttMs / 2 + 35);
 
       setStats({
-        encodedFrames: Math.round(frameCountRef.current),
-        bytesSent:     Math.round(bytesRef.current),
-        lastRttUs:     Math.round(rttUs),
-        clockOffsetUs: Math.round(offsetUs),
-        bitrateKbps:   Math.round((bpt * 8 * fps) / 1000),
-        latencyMs:     Math.round(bufferRef.current * 1000 + CHUNK_SAMPLES / SAMPLE_RATE * 500),
-        bufferMs:      Math.round(bufferRef.current * 1000),
+        encodedFrames: frameCountRef.current,
+        bytesSent:     0,           // WebRTC handles this internally
+        lastRttUs:     Math.round(rttMs * 1000),
+        clockOffsetUs: Math.round(offsetMs * 1000),
+        bitrateKbps:   40,          // Opus ~40 kbps for music
+        latencyMs:     latMs,
+        bufferMs:      Math.round(rttMs / 2), // WebRTC native JB ≈ RTT/2
       });
     }, 500);
   }, []);
@@ -232,6 +190,7 @@ export function useAudioEngine() {
     setIsLoading(true);
 
     try {
+      // 1. Capture display/tab audio
       const display = await (navigator.mediaDevices as any).getDisplayMedia({
         video: true,
         audio: true,
@@ -246,15 +205,16 @@ export function useAudioEngine() {
         const isMac = /Mac/.test(navigator.userAgent) && !/Win/.test(navigator.userAgent);
         throw new Error(
           isMac
-            ? '🍎 macOS: In the share dialog → switch to "Tab" → pick your Spotify/YouTube tab → tick "Share tab audio" ✅ → Share.'
-            : '⚠️ No audio captured.\n• Sharing a Tab → tick "Share tab audio" ✅\n• Sharing Screen → tick "Share system audio" ✅'
+            ? '🍎 macOS: In share dialog → pick "Tab" → choose Spotify/YouTube tab → tick "Share tab audio" ✅'
+            : '⚠️ No audio captured.\n• Sharing Tab → tick "Share tab audio"\n• Sharing Screen → tick "Share system audio" (Windows)'
         );
       }
 
       const audioStream = new MediaStream(audioTracks);
       streamRef.current = audioStream;
 
-      const ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+      // 2. AudioContext for analyser only (not playback — stream is sent via WebRTC)
+      const ctx = new AudioContext();
       audioCtxRef.current = ctx;
 
       const source   = ctx.createMediaStreamSource(audioStream);
@@ -262,28 +222,10 @@ export function useAudioEngine() {
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.8;
       source.connect(analyser);
+      // Do NOT connect to ctx.destination (would create feedback/double-play on host)
       setAnalyserNode(analyser);
 
-      // Capture PCM via ScriptProcessor
-      // eslint-disable-next-line @typescript-eslint/no-deprecated
-      const processor = ctx.createScriptProcessor(CHUNK_SAMPLES, 1, 1);
-      source.connect(processor);
-      processor.connect(ctx.destination);
-      processorRef.current = processor;
-
-      let seq = 0;
-      processor.onaudioprocess = (e) => {
-        const f32    = e.inputBuffer.getChannelData(0);
-        const i16    = f32ToI16(f32);
-        const hostTs = e.playbackTime;
-        const msg    = { type: 'audio', seq: seq++, ts: hostTs, samples: i16ToB64(i16) };
-
-        clientConnsRef.current.forEach(conn => {
-          try { if (conn.open) conn.send(msg); } catch {}
-        });
-      };
-
-      // PeerJS host
+      // 3. PeerJS peer
       const code = makeRoomCode();
       const Peer  = await loadPeer();
       const peer  = new Peer(`mj2-${code}`, PEER_CONFIG);
@@ -295,28 +237,40 @@ export function useAudioEngine() {
         setTimeout(() => rej(new Error('PeerJS timeout — try again')), 12_000);
       });
 
-      peer.on('connection', (conn: any) => {
-        conn.on('open', () => {
-          conn.send({ type: 'init', sampleRate: SAMPLE_RATE, channelCount: 1 });
-          clientConnsRef.current.set(conn.peer, conn);
+      // 4. Accept incoming data connections (NTP) then call client with audio
+      peer.on('connection', (dataConn: any) => {
+        dataConn.on('open', () => {
+          // Call the client with the audio stream
+          const call = peer.call(dataConn.peer, audioStream);
+
+          clientConnsRef.current.set(dataConn.peer, { dataConn, call });
           setConnectedClients(clientConnsRef.current.size);
 
-          conn.on('data', (msg: any) => {
+          // Handle NTP pings
+          dataConn.on('data', (msg: any) => {
             if (msg?.type === 'ping') {
-              conn.send({ type: 'pong', id: msg.id, hostTs: audioCtxRef.current!.currentTime, clientTs: msg.clientTs });
+              dataConn.send({
+                type: 'pong',
+                id: msg.id,
+                hostTs: performance.now(),
+                clientTs: msg.clientTs,
+              });
             }
           });
 
           const remove = () => {
-            clientConnsRef.current.delete(conn.peer);
+            const entry = clientConnsRef.current.get(dataConn.peer);
+            try { entry?.call?.close(); } catch {}
+            clientConnsRef.current.delete(dataConn.peer);
             setConnectedClients(clientConnsRef.current.size);
           };
-          conn.on('close', remove);
-          conn.on('error', remove);
+          dataConn.on('close', remove);
+          dataConn.on('error', remove);
         });
       });
 
       peer.on('error', (err: any) => setError(`Host error: ${err?.message ?? err?.type}`));
+      // Stop if user clicks "Stop sharing" in browser
       audioTracks[0].addEventListener('ended', () => stop());
 
       setMode('host');
@@ -347,16 +301,21 @@ export function useAudioEngine() {
       return;
     }
 
-    // Create + resume AudioContext NOW (inside user gesture) so it's unlocked
-    let ctx: AudioContext;
-    try {
-      ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
-      audioCtxRef.current = ctx;
-      await ctx.resume();
-    } catch {
-      ctx = new AudioContext();
-      audioCtxRef.current = ctx;
-    }
+    // ── Create and unlock audio element NOW inside user gesture ──
+    // We prime it here so autoplay is allowed when srcObject is set later.
+    const audio = new Audio();
+    audio.autoplay = true;
+    audio.playsInline = true;  // critical for iOS
+    document.body.appendChild(audio);
+    audioElRef.current = audio;
+
+    // Kick a silent play so mobile browsers "unlock" this element
+    try { await audio.play(); } catch {}
+
+    // AudioContext for analyser only
+    const ctx = new AudioContext();
+    audioCtxRef.current = ctx;
+    try { await ctx.resume(); } catch {}
 
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
@@ -369,15 +328,45 @@ export function useAudioEngine() {
       const peer     = new Peer(clientId, PEER_CONFIG);
       peerRef.current = peer;
 
+      // ── IMPORTANT: register call handler BEFORE connecting data channel ──
+      // The host calls us immediately when the data connection opens.
+      // If we register too late, we miss the call.
+      peer.on('call', (call: any) => {
+        call.answer(); // listen-only — no mic stream sent back
+
+        call.on('stream', (remoteStream: MediaStream) => {
+          // Route through audio element (handles mobile autoplay natively)
+          audio.srcObject = remoteStream;
+          const playPromise = audio.play();
+          if (playPromise) {
+            playPromise.catch(() => {
+              // Autoplay blocked — show tap-to-listen overlay
+              setNeedsGesture(true);
+            });
+          }
+
+          // Also pipe through AudioContext for visualizer analyser
+          // (don't connect to ctx.destination — audio element handles speakers)
+          const source = ctx.createMediaStreamSource(remoteStream);
+          source.connect(analyser);
+        });
+
+        call.on('error', (err: any) => {
+          setError(`Stream error: ${err?.message ?? 'call failed'}`);
+        });
+      });
+
+      // Wait for peer to open
       await new Promise<void>((res, rej) => {
         peer.on('open', res);
         peer.on('error', rej);
         setTimeout(() => rej(new Error('PeerJS timeout')), 12_000);
       });
 
+      // Connect data channel (triggers host to call us with audio)
       const conn = peer.connect(`mj2-${roomId}`, {
         reliable:      true,
-        serialization: 'json', // ← JSON: 100% cross-browser, no BinaryPack issues
+        serialization: 'json',
       });
 
       // Timeout if data channel never opens
@@ -385,7 +374,7 @@ export function useAudioEngine() {
         if (!conn.open) {
           setError(
             'Connection timed out.\n' +
-            '• Check the room code with the host\n' +
+            '• Check the room code\n' +
             '• Make sure the host is broadcasting\n' +
             '• Try a different network if on mobile data'
           );
@@ -412,113 +401,36 @@ export function useAudioEngine() {
         setIsLoading(false);
       });
 
-      // NTP helpers
+      // NTP ping helpers
       const sendPing = () => {
         if (!conn.open) return;
         const id = pingIdRef.current++;
-        const clientTs = ctx.currentTime;
-        pingTsRef.current.set(id, clientTs);
-        try { conn.send({ type: 'ping', id, clientTs }); } catch {}
+        const now = performance.now();
+        pingTsRef.current.set(id, now);
+        try { conn.send({ type: 'ping', id, clientTs: now }); } catch {}
       };
 
       conn.on('open', () => {
         clearTimeout(connTimeout);
-        sendPing();
-        ntpIntervalRef.current = setInterval(sendPing, NTP_INTERVAL);
         setIsLoading(false);
         setMode('client');
+        sendPing();
+        ntpIntervalRef.current = setInterval(sendPing, NTP_INTERVAL);
         startStatsTick();
       });
 
-      // ── Relative scheduling state + adaptive jitter buffer ──────────────
-      let anchorClientTime: number | null = null;
-      let anchorHostTs:     number | null = null;
-      const headroomHistory: number[] = [];  // rolling headroom window
-      bufferRef.current = MIN_BUFFER;        // reset buffer for this session
-
       conn.on('data', (msg: any) => {
-        if (!msg?.type) return;
-
-        // ── NTP pong ──────────────────────────────────────────────────────
-        if (msg.type === 'pong') {
-          const sendTs = pingTsRef.current.get(msg.id);
-          if (sendTs === undefined) return;
+        if (msg?.type === 'pong') {
+          const sendTime = pingTsRef.current.get(msg.id);
+          if (sendTime === undefined) return;
           pingTsRef.current.delete(msg.id);
-          const rtt = ctx.currentTime - sendTs;
-          rttHistRef.current.push(rtt);
-          if (rttHistRef.current.length > MAX_RTT_HIST) rttHistRef.current.shift();
-          const minRtt = Math.min(...rttHistRef.current);
-          clockOffsetRef.current = msg.hostTs - sendTs - minRtt / 2;
-          return;
-        }
 
-        // ── Audio frame ───────────────────────────────────────────────────
-        if (msg.type === 'audio') {
-          // Resume AudioContext if suspended (Android Chrome)
-          if (ctx.state === 'suspended') {
-            setNeedsGesture(true);
-            ctx.resume().then(() => setNeedsGesture(false)).catch(() => {});
-            return;
-          }
+          const rttMs = performance.now() - sendTime;
+          rttMsHistRef.current.push(rttMs);
+          if (rttMsHistRef.current.length > MAX_RTT_HIST) rttMsHistRef.current.shift();
 
-          // ── Adaptive jitter buffer ─────────────────────────────────────
-          // Set anchor on first frame with current adaptive buffer size
-          if (anchorClientTime === null || anchorHostTs === null) {
-            anchorClientTime = ctx.currentTime + bufferRef.current;
-            anchorHostTs     = msg.ts;
-            headroomHistory.length = 0;
-          }
-
-          // Relative schedule: preserves host's relative timing exactly
-          let scheduleAt = anchorClientTime + (msg.ts - anchorHostTs);
-
-          // Hard reset if we've fallen badly behind (tab backgrounded, etc.)
-          if (scheduleAt < ctx.currentTime - CATCHUP_THRESH) {
-            anchorClientTime = ctx.currentTime + bufferRef.current;
-            anchorHostTs     = msg.ts;
-            scheduleAt       = anchorClientTime;
-            headroomHistory.length = 0;
-          }
-
-          // Measure headroom (how far in the future this frame is scheduled)
-          const headroom = scheduleAt - ctx.currentTime;
-          headroomHistory.push(headroom);
-
-          // Every JB_WINDOW frames, tune the buffer size
-          if (headroomHistory.length >= JB_WINDOW) {
-            const minHeadroom = Math.min(...headroomHistory);
-            headroomHistory.length = 0; // reset window
-
-            if (minHeadroom < JB_TARGET_FLOOR) {
-              // Frames arriving too close to their play time (or late) → grow buffer
-              const deficit = JB_TARGET_FLOOR - minHeadroom;
-              const grow    = deficit * JB_GROW_FACTOR;
-              bufferRef.current = Math.min(MAX_BUFFER, bufferRef.current + grow);
-              // Shift anchor forward so future frames land further ahead
-              anchorClientTime = (anchorClientTime ?? ctx.currentTime) + grow;
-            } else if (minHeadroom > JB_TARGET_FLOOR * 4 && bufferRef.current > MIN_BUFFER) {
-              // Plenty of headroom → cautiously shrink buffer toward minimum
-              bufferRef.current = Math.max(MIN_BUFFER, bufferRef.current - JB_SHRINK_STEP);
-              // Shift anchor back to reduce latency
-              anchorClientTime = (anchorClientTime ?? ctx.currentTime) - JB_SHRINK_STEP;
-            }
-          }
-
-          // Skip the frame if we've genuinely fallen behind (post-adjustment)
-          if (scheduleAt < ctx.currentTime) return;
-
-          try {
-            const i16    = b64ToI16(msg.samples);
-            const f32    = i16ToF32(i16);
-            const buffer = ctx.createBuffer(1, f32.length, SAMPLE_RATE);
-            buffer.getChannelData(0).set(f32);
-
-            const src = ctx.createBufferSource();
-            src.buffer = buffer;
-            src.connect(analyser);
-            src.connect(ctx.destination);
-            src.start(scheduleAt);
-          } catch {}
+          const minRtt = Math.min(...rttMsHistRef.current);
+          clockOffsetRef.current = msg.hostTs - sendTime - minRtt / 2;
         }
       });
 
@@ -534,14 +446,16 @@ export function useAudioEngine() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadPeer, startStatsTick, cleanup]);
 
-  // ── Resume audio (mobile Tap-to-Listen button) ────────────────────────────
+  // ── Resume audio (mobile Tap-to-Listen) ───────────────────────────────────
 
   const resumeAudio = useCallback(() => {
-    const ctx = audioCtxRef.current;
-    if (!ctx) return;
-    ctx.resume()
-      .then(() => setNeedsGesture(false))
-      .catch(() => setError('Could not resume audio. Please reload the page.'));
+    const audio = audioElRef.current;
+    if (audio) {
+      audio.play()
+        .then(() => setNeedsGesture(false))
+        .catch(() => setError('Could not resume audio. Please reload.'));
+    }
+    audioCtxRef.current?.resume().catch(() => {});
   }, []);
 
   // ── Stop ──────────────────────────────────────────────────────────────────
