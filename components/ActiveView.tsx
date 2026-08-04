@@ -1,11 +1,8 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
-import PulseRing from './PulseRing';
+import React, { useState, useRef, useMemo } from 'react';
 import StatsPanel from './StatsPanel';
-import AudioVisualizer from './AudioVisualizer';
 import { AppMode, EngineStats } from '@/hooks/useAudioEngine';
-import { COLORS } from '@/lib/colors';
 
 interface ActiveViewProps {
   mode:                AppMode;
@@ -48,23 +45,14 @@ export default function ActiveView({
   onStop,
   onResumeAudio,
 }: ActiveViewProps) {
-  const isHost      = mode === 'host';
-  const accentColor = isHost ? COLORS.neonPurple : COLORS.neonBlue;
-  const icon        = isHost ? '📡' : '🎧';
-  const title       = isHost ? 'Host Session' : 'Listening Party';
-  const subtitle    = isHost
-    ? 'Upload a track or load from your local library'
-    : 'Synchronized perfect 0ms playback';
-
-  const [copied, setCopied] = useState(false);
+  const isHost = mode === 'host';
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showStats, setShowStats] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(roomCode).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
+  const filteredLibrary = useMemo(() => {
+    return libraryTracks.filter(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
+  }, [libraryTracks, searchQuery]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -74,311 +62,135 @@ export default function ActiveView({
   };
 
   return (
-    <section className="active-view">
-      {/* ── "Tap to Listen" overlay for mobile autoplay block ── */}
+    <section className="premium-active-view">
+      {/* Mobile Audio Unlock Overlay */}
       {needsGesture && (
-        <div className="tap-to-listen">
-          <button
-            id="tap-to-listen-btn"
-            className="tap-to-listen__btn"
-            onClick={onResumeAudio}
-          >
-            <span className="tap-to-listen__icon">🔊</span>
-            <span className="tap-to-listen__label">Tap to Unlock Audio</span>
-            <span className="tap-to-listen__sub">
-              Required by your browser to allow playback
-            </span>
-          </button>
+        <div className="gesture-overlay">
+          <div className="gesture-modal">
+            <div className="gesture-icon">🔊</div>
+            <h2>Tap to Play</h2>
+            <p>Your browser paused the audio. Tap below to instantly sync.</p>
+            <button className="btn-primary large" onClick={onResumeAudio}>
+              Resume Audio
+            </button>
+          </div>
         </div>
       )}
 
-      {/* Pulsing icon */}
-      <div className="active-icon-container">
-        <PulseRing color={accentColor} active={isPlaying} />
-        <span className="active-icon">{icon}</span>
+      {/* Main UI */}
+      <div className="view-header">
+        <div className="session-info">
+          <h2>{isHost ? 'Host Session' : 'Listening Party'}</h2>
+          {isHost && (
+            <p className="room-code">
+              Room Code: <strong>{roomCode}</strong>
+              <span className="client-count"> • {connectedClients} listening</span>
+            </p>
+          )}
+        </div>
+        <button className="btn-icon" onClick={() => setShowStats(!showStats)} title="Toggle Stats">
+          ℹ️
+        </button>
       </div>
 
-      <h2 className="active-title">{title}</h2>
-      <p className="active-subtitle">{subtitle}</p>
-
-      {/* Room code banner (host only) */}
-      {isHost && roomCode && (
-        <div className="room-code-banner">
-          <div className="room-code-banner__left">
-            <span className="room-code-banner__label">Room Code</span>
-            <span className="room-code-banner__code">{roomCode}</span>
-            <span className="room-code-banner__hint">Share this with clients to join</span>
+      <div className="content-grid">
+        {/* Left Column: Player */}
+        <div className="player-section card">
+          <div className="album-art-placeholder">
+            <div className={`art-pulse ${isPlaying ? 'playing' : ''}`}>🎵</div>
           </div>
-          <button
-            id="copy-room-code-btn"
-            className="room-code-banner__copy"
-            onClick={handleCopy}
-            title="Copy room code"
-          >
-            {copied ? '✓ Copied' : '⧉ Copy'}
-          </button>
+          
+          <div className="track-details">
+            <h3>{trackName || 'No track selected'}</h3>
+            <p className="artist-name">{trackName ? 'High-Fidelity Audio' : 'Awaiting selection...'}</p>
+          </div>
+
+          <div className="progress-container">
+            <div className="progress-bar">
+              <div 
+                className="progress-fill" 
+                style={{ width: `${downloadProgress}%`, background: downloadProgress < 100 ? '#555' : '#fff' }} 
+              />
+            </div>
+            <div className="progress-labels">
+              <span>{downloadProgress < 100 && trackName ? `Downloading ${Math.round(downloadProgress)}%` : '0:00'}</span>
+              <span>{trackName && downloadProgress === 100 ? 'Ready' : ''}</span>
+            </div>
+          </div>
+
+          {isHost ? (
+            <div className="controls">
+              <button 
+                className="btn-play-pause" 
+                onClick={isPlaying ? onBroadcastPause : onBroadcastPlay}
+                disabled={!trackName || downloadProgress < 100}
+              >
+                {isPlaying ? '⏸' : '▶'}
+              </button>
+            </div>
+          ) : (
+            <div className="client-status">
+              {isPlaying ? 'Synchronized perfectly 🎧' : 'Waiting for host to play...'}
+            </div>
+          )}
         </div>
-      )}
 
-      {/* Track Info & Controls */}
-      <div className="track-controls-card">
-        {isHost ? (
-          <div className="host-controls">
-            {!trackName && (
-              <div className="upload-prompt">
-                <input
-                  type="file"
-                  accept="audio/mpeg,audio/wav,audio/ogg"
-                  onChange={handleFileChange}
-                  style={{ display: 'none' }}
-                  ref={fileInputRef}
-                />
-                
-                <div className="library-section">
-                  {libraryTracks.length > 0 && (
-                    <>
-                      <h4 className="library-title">My Saved Library</h4>
-                      <ul className="library-list">
-                        {libraryTracks.map(t => (
-                          <li key={t} className="library-item">
-                            <button className="library-play-btn" onClick={() => onLoadFromLibrary(t)}>▶ {t}</button>
-                            <button className="library-del-btn" onClick={() => onDeleteFromLibrary(t)} title="Delete from local cache">✕</button>
-                          </li>
-                        ))}
-                      </ul>
-                      <div className="library-divider">or</div>
-                    </>
-                  )}
-                </div>
+        {/* Right Column: Library (Host Only) */}
+        {isHost && (
+          <div className="library-section card">
+            <div className="library-header">
+              <h3>My Library</h3>
+              <button className="btn-secondary small" onClick={() => fileInputRef.current?.click()}>
+                + Upload
+              </button>
+              <input
+                type="file"
+                accept="audio/*"
+                onChange={handleFileChange}
+                style={{ display: 'none' }}
+                ref={fileInputRef}
+              />
+            </div>
 
-                <button 
-                  className="primary-button" 
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isLoading || connectedClients === 0}
-                >
-                  {isLoading ? 'Uploading...' : connectedClients === 0 ? 'Wait for clients to join...' : '📁 Select New Audio File'}
-                </button>
-              </div>
-            )}
-            
-            {trackName && (
-              <div className="track-info">
-                <h3>{trackName}</h3>
-                <div className="progress-bar-container">
-                  <div className="progress-bar-fill" style={{ width: `${downloadProgress}%`, backgroundColor: accentColor }}></div>
-                </div>
-                <p className="progress-text">
-                  {downloadProgress < 100 
-                    ? `Transferring to clients... ${Math.round(downloadProgress)}%` 
-                    : 'Ready to play'}
-                </p>
-                
-                <div className="playback-buttons">
-                  {isPlaying ? (
-                    <button className="primary-button" onClick={onBroadcastPause}>⏸ Pause</button>
-                  ) : (
-                    <button className="primary-button" onClick={onBroadcastPlay} disabled={downloadProgress < 100}>▶ Play Sync</button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="client-controls">
-            {trackName ? (
-              <div className="track-info">
-                <h3>{trackName}</h3>
-                <div className="progress-bar-container">
-                  <div className="progress-bar-fill" style={{ width: `${downloadProgress}%`, backgroundColor: accentColor }}></div>
-                </div>
-                <p className="progress-text">
-                  {downloadProgress < 100 
-                    ? `Downloading track... ${Math.round(downloadProgress)}%` 
-                    : isPlaying ? '🎵 Playing in sync' : 'Waiting for host to play...'}
-                </p>
-              </div>
-            ) : (
-              <div className="waiting-prompt">
-                <p>Waiting for host to select a track...</p>
-                {libraryTracks.length > 0 && (
-                  <p className="client-cache-note">({libraryTracks.length} tracks cached on your device for instant loading)</p>
-                )}
-              </div>
-            )}
+            <div className="search-box">
+              <span className="search-icon">🔍</span>
+              <input 
+                type="text" 
+                placeholder="Search tracks..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+
+            <ul className="library-list">
+              {filteredLibrary.length === 0 ? (
+                <li className="empty-state">No tracks found. Upload some music!</li>
+              ) : (
+                filteredLibrary.map(t => (
+                  <li key={t} className={`library-item ${t === trackName ? 'active' : ''}`}>
+                    <button className="track-btn" onClick={() => onLoadFromLibrary(t)}>
+                      <span className="track-icon">{t === trackName && isPlaying ? '🔊' : '🎵'}</span>
+                      <span className="track-title">{t}</span>
+                    </button>
+                    <button className="delete-btn" onClick={() => onDeleteFromLibrary(t)}>✕</button>
+                  </li>
+                ))
+              )}
+            </ul>
           </div>
         )}
       </div>
 
-      {/* Audio visualizer */}
-      <AudioVisualizer
-        analyserNode={analyserNode}
-        mode={mode}
-        accentColor={accentColor}
-      />
+      {showStats && (
+        <div className="stats-wrapper">
+          <StatsPanel stats={stats} mode={mode} connectedClients={connectedClients} />
+        </div>
+      )}
 
-      {/* Stats panel */}
-      <StatsPanel stats={stats} mode={mode} connectedClients={connectedClients} />
-
-      {/* Stop button */}
-      <button
-        id="stop-streaming-btn"
-        className="stop-button"
-        onClick={onStop}
-        disabled={isLoading}
-        aria-label="Stop session"
-      >
-        {isLoading && !trackName ? (
-          <span className="stop-button__loading">
-            <span className="spinner" />
-            Stopping…
-          </span>
-        ) : (
-          isHost ? '■ End Session' : '■ Leave Room'
-        )}
+      <button className="btn-danger stop-btn" onClick={onStop}>
+        End Session
       </button>
-      
-      <style jsx>{`
-        .track-controls-card {
-          background: rgba(255, 255, 255, 0.05);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          border-radius: 16px;
-          padding: 24px;
-          margin-bottom: 24px;
-          width: 100%;
-          text-align: center;
-        }
-        .upload-prompt p {
-          margin-bottom: 16px;
-          color: rgba(255, 255, 255, 0.7);
-        }
-        .primary-button {
-          background: ${accentColor};
-          color: #000;
-          border: none;
-          padding: 12px 24px;
-          border-radius: 8px;
-          font-weight: bold;
-          cursor: pointer;
-          transition: opacity 0.2s, transform 0.2s;
-        }
-        .primary-button:hover:not(:disabled) {
-          opacity: 0.9;
-          transform: scale(1.02);
-        }
-        .primary-button:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-        .track-info h3 {
-          margin: 0 0 12px 0;
-          font-size: 1.1rem;
-          color: #fff;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .progress-bar-container {
-          height: 8px;
-          background: rgba(255, 255, 255, 0.1);
-          border-radius: 4px;
-          overflow: hidden;
-          margin-bottom: 8px;
-        }
-        .progress-bar-fill {
-          height: 100%;
-          transition: width 0.1s linear;
-        }
-        .progress-text {
-          font-size: 0.85rem;
-          color: rgba(255, 255, 255, 0.6);
-          margin: 0 0 16px 0;
-        }
-        .playback-buttons {
-          display: flex;
-          gap: 12px;
-          justify-content: center;
-        }
-        .waiting-prompt p {
-          color: rgba(255, 255, 255, 0.5);
-          margin: 0;
-          font-style: italic;
-        }
-        .client-cache-note {
-          font-size: 0.8rem;
-          margin-top: 8px !important;
-          color: rgba(255, 255, 255, 0.3) !important;
-        }
-        
-        .library-section {
-          margin-bottom: 24px;
-        }
-        .library-title {
-          font-size: 0.9rem;
-          text-transform: uppercase;
-          letter-spacing: 1px;
-          color: rgba(255, 255, 255, 0.5);
-          margin: 0 0 12px 0;
-        }
-        .library-list {
-          list-style: none;
-          padding: 0;
-          margin: 0;
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          max-height: 200px;
-          overflow-y: auto;
-        }
-        .library-item {
-          display: flex;
-          justify-content: space-between;
-          background: rgba(255, 255, 255, 0.03);
-          border-radius: 6px;
-          padding: 4px;
-        }
-        .library-item:hover {
-          background: rgba(255, 255, 255, 0.08);
-        }
-        .library-play-btn {
-          background: transparent;
-          border: none;
-          color: #fff;
-          text-align: left;
-          padding: 8px 12px;
-          flex-grow: 1;
-          cursor: pointer;
-          font-size: 0.9rem;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .library-del-btn {
-          background: transparent;
-          border: none;
-          color: rgba(255, 100, 100, 0.6);
-          cursor: pointer;
-          padding: 0 12px;
-        }
-        .library-del-btn:hover {
-          color: rgba(255, 100, 100, 1);
-        }
-        .library-divider {
-          margin-top: 16px;
-          color: rgba(255, 255, 255, 0.3);
-          font-size: 0.9rem;
-          position: relative;
-        }
-        .library-divider::before, .library-divider::after {
-          content: '';
-          position: absolute;
-          top: 50%;
-          width: 40%;
-          height: 1px;
-          background: rgba(255, 255, 255, 0.1);
-        }
-        .library-divider::before { left: 0; }
-        .library-divider::after { right: 0; }
-      `}</style>
+
     </section>
   );
 }

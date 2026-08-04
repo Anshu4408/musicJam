@@ -249,6 +249,10 @@ export function useAudioEngine() {
       const ctx = new AudioContext();
       audioCtxRef.current = ctx;
 
+      ctx.onstatechange = () => {
+        setNeedsGesture(ctx.state === 'suspended');
+      };
+
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       analyser.smoothingTimeConstant = 0.8;
@@ -408,6 +412,10 @@ export function useAudioEngine() {
     const ctx = new AudioContext();
     audioCtxRef.current = ctx;
     ctx.resume().catch(() => {});
+    
+    ctx.onstatechange = () => {
+      setNeedsGesture(ctx.state === 'suspended');
+    };
 
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
