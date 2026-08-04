@@ -499,6 +499,8 @@ export function useAudioEngine() {
           
           setTrackName(msg.trackName);
           stopPlayback();
+          audioBufferRef.current = null; // Clear old buffer so we don't accidentally play it
+
           
           // Check if we have it in IndexedDB
           const savedTrack = await getTrackFromDb(msg.trackName);
@@ -555,11 +557,20 @@ export function useAudioEngine() {
             setError("Failed to decode audio file.");
           }
         } else if (msg?.type === 'play') {
-          startPlaybackAt(msg.startNtp, msg.seekPos);
+          if (!audioBufferRef.current) {
+            // Still downloading, cache the play command
+            pendingWelcomeState = { isPlaying: true, startNtp: msg.startNtp, seekPos: msg.seekPos };
+          } else {
+            startPlaybackAt(msg.startNtp, msg.seekPos);
+          }
         } else if (msg?.type === 'pause') {
-          stopPlayback();
-          if (msg.seekPos !== undefined) {
-            playbackStartOffsetRef.current = msg.seekPos;
+          if (!audioBufferRef.current) {
+            if (pendingWelcomeState) pendingWelcomeState.isPlaying = false;
+          } else {
+            stopPlayback();
+            if (msg.seekPos !== undefined) {
+              playbackStartOffsetRef.current = msg.seekPos;
+            }
           }
         } else if (msg?.type === 'sync') {
           if (isPlaying && ctx) {
