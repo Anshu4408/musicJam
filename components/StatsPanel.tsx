@@ -78,11 +78,12 @@ export default function StatsPanel({ stats, mode, connectedClients }: StatsPanel
         ) : (
           <>
             <StatTile
-              label="Clock Offset"
+              label="Total Latency"
               value={stats ? `${stats.latencyMs}` : '—'}
               unit="ms"
               color={COLORS.neonBlue}
             />
+
             <StatTile
               label="RTT"
               value={stats ? `${Math.round(stats.lastRttUs / 1000)}` : '—'}
