@@ -86,7 +86,6 @@ html, body {
   position: relative;
   z-index: 10;
   overflow-y: auto;
-  perspective: 1000px; /* Enable 3D space */
 }
 
 /* ── HEADER ── */
@@ -274,9 +273,10 @@ button {
 .action-stack {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 32px;
+  gap: 24px;
   width: 100%;
-  perspective: 1200px; /* 3D effect enabler */
+  max-width: 800px;
+  perspective: 1000px;
 }
 
 .action-card {
