@@ -270,7 +270,7 @@ export default function ActiveView({
                 </span>
               </div>
               <div>
-                <div style={{ fontWeight: '600' }}>{trackName || 'No track selected'}</div>
+                <div className="track-title-clamp" style={{ fontWeight: '600' }}>{trackName || 'No track selected'}</div>
                 <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                   {downloadProgress < 100 && trackName ? `Downloading ${Math.round(downloadProgress)}%` : (trackName ? 'High-Fidelity Sync' : '—')}
                 </div>

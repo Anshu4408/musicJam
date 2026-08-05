@@ -603,16 +603,25 @@ button {
 
 /* ── MOBILE RESPONSIVENESS ── */
 @media (max-width: 1024px) {
+  body, html {
+    overflow-x: hidden;
+    width: 100vw;
+  }
+
+  .container {
+    padding: 0 12px;
+  }
+
   .header {
-    padding: 16px;
+    padding: 16px 8px;
     flex-direction: column;
-    gap: 16px;
+    gap: 12px;
   }
   
   .view-header {
     flex-direction: column !important;
     align-items: center;
-    gap: 16px;
+    gap: 12px;
     text-align: center;
   }
 
@@ -628,20 +637,64 @@ button {
   .action-card {
     /* Mobile devices don't have hover, so we use a continuous animation for the 3D effect */
     animation: mobile-float-card 4s ease-in-out infinite alternate;
+    min-height: auto;
+    padding: 24px;
   }
 
   .bottom-player-wrapper {
-    width: calc(100% - 32px);
-    bottom: 24px;
+    width: calc(100% - 24px);
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
   }
   
   .hero-art-container {
-    width: min(320px, 85vw);
-    margin-bottom: 40px;
+    width: min(280px, 75vw);
+    margin-bottom: 24px;
   }
   
   .glass-pill {
-    padding: 12px 16px;
+    padding: 12px;
+    gap: 8px;
+  }
+
+  /* Compact the bottom player row to prevent horizontal breaking */
+  .player-main-row {
+    gap: 8px;
+  }
+
+  .player-art {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+  }
+  
+  .player-art span svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .track-title-clamp {
+    max-width: 130px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 14px;
+  }
+
+  .btn-circle {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+  }
+
+  .player-right {
+    gap: 4px;
+  }
+
+  .time-label {
+    min-width: 32px;
+    font-size: 11px;
   }
 }
 
