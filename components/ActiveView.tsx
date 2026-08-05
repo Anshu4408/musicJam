@@ -76,7 +76,7 @@ export default function ActiveView({
     };
     rafId = requestAnimationFrame(updateProgressUI);
     return () => cancelAnimationFrame(rafId);
-  }, [getPlaybackPosition]);
+  }, [getPlaybackPosition, trackDuration]);
 
   const filteredLibrary = useMemo(() => {
     return libraryTracks.filter(t => t.toLowerCase().includes(searchQuery.toLowerCase()));

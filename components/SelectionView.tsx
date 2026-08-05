@@ -23,7 +23,10 @@ export default function SelectionView({ onStartHost, onStartClient, isLoading }:
           <button className="btn-primary" disabled={isLoading}>Start Hosting</button>
         </div>
 
-        <div className="action-card">
+        <form className="action-card" onSubmit={(e) => {
+          e.preventDefault();
+          if (code.length === 6 && !isLoading) onStartClient(code);
+        }}>
           <h3>Join a Party</h3>
           <p>Enter a 6-letter code to listen in.</p>
           <input
@@ -33,22 +36,17 @@ export default function SelectionView({ onStartHost, onStartClient, isLoading }:
             maxLength={6}
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && code.length === 6 && !isLoading) {
-                onStartClient(code);
-              }
-            }}
             disabled={isLoading}
           />
           <button 
+            type="submit"
             className="btn-primary" 
             style={{ width: '100%', marginTop: '16px' }}
-            onClick={() => onStartClient(code)}
             disabled={isLoading || code.length !== 6}
           >
             Join Now
           </button>
-        </div>
+        </form>
       </div>
     </section>
   );
