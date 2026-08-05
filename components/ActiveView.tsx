@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useMemo } from 'react';
-import { Search, Headphones, Music, Volume2, Pause, Play, Info, X, Trash2 } from 'lucide-react';
+import { Search, Headphones, Music, Volume2, Pause, Play, Info, X, Trash2, Upload } from 'lucide-react';
 import StatsPanel from './StatsPanel';
 import { AppMode, EngineStats } from '@/hooks/useAudioEngine';
 
@@ -139,23 +139,19 @@ export default function ActiveView({
       </div>
 
       <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        {/* Massive Now Playing Visual (3D Tilting) */}
-        <div className="hero-art-container">
-          <div 
-            className={`hero-art ${isPlaying ? '' : 'paused'}`}
-            style={trackName ? { backgroundImage: `linear-gradient(135deg, hsl(${stringToHue(trackName)}, 80%, 60%), hsl(${(stringToHue(trackName) + 40) % 360}, 80%, 40%))` } : undefined}
-          >
-            <div className="hero-art-icon" style={{ color: 'white', opacity: 0.9 }}>
-              {isPlaying ? <Headphones size={64} /> : <Music size={64} />}
-            </div>
+      <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+        {/* ── SPOTIFY-STYLE TRACK HEADER ── */}
+        <div className="active-track-banner" style={{ display: 'flex', alignItems: 'flex-end', gap: '24px', padding: '24px', background: 'linear-gradient(transparent 0%, rgba(0,0,0,0.5) 100%)', borderBottom: '1px solid rgba(255,255,255,0.05)', marginBottom: '24px' }}>
+          <div className="banner-art" style={{ width: '120px', height: '120px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+            <Music size={48} color="var(--text-muted)" />
           </div>
-        </div>
-
-        <div className="track-info-large">
-          <h2>{trackName || 'No track selected'}</h2>
-          <p>
-             {downloadProgress < 100 && trackName ? `Downloading ${Math.round(downloadProgress)}%` : (trackName ? 'High-Fidelity Audio' : 'Waiting for host...')}
-          </p>
+          <div className="banner-info" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-primary)' }}>Now Playing</span>
+            <h2 style={{ fontSize: 'clamp(28px, 6vw, 48px)', fontWeight: '800', letterSpacing: '-0.02em', margin: 0, lineHeight: 1.1 }}>{trackName || 'No track selected'}</h2>
+            <p style={{ fontSize: '14px', color: 'var(--text-secondary)', margin: 0 }}>
+              {downloadProgress < 100 && trackName ? `Downloading ${Math.round(downloadProgress)}%` : (trackName ? 'High-Fidelity Audio' : 'Waiting for host...')}
+            </p>
+          </div>
         </div>
 
         {isHost ? (
@@ -190,42 +186,36 @@ export default function ActiveView({
 
             <div className="library-list">
               {filteredLibrary.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
-                  <p>No tracks found. Upload audio files to add them to your library.</p>
+                <div style={{ textAlign: 'center', padding: '48px 16px', color: 'var(--text-muted)' }}>
+                  <p>No tracks found. Upload audio files to add them.</p>
                 </div>
               ) : (
                 filteredLibrary.map((t, index) => (
-                  <div key={t} onClick={() => onLoadFromLibrary(t)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderRadius: '16px', background: t === trackName ? 'var(--bg-glass-light)' : 'transparent', border: t === trackName ? '1px solid var(--accent-primary)' : '1px solid transparent', cursor: 'pointer', transition: 'all 0.2s' }}>
-                    <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                      <div style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>0{index + 1}</div>
-                      <div>
-                        <div style={{ fontWeight: '600', marginBottom: '4px' }}>{t}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>High-Fidelity Audio</div>
+                  <div key={t} className={`track-row ${t === trackName ? 'active' : ''}`} onClick={() => onLoadFromLibrary(t)}>
+                    <div className="track-left">
+                      <div className="track-num-container">
+                        <span className="track-num">{index + 1}</span>
+                        <Play className="track-play-icon" size={14} fill="currentColor" />
+                      </div>
+                      <div className="track-art-placeholder">
+                        <Music size={16} color="var(--text-muted)" />
+                      </div>
+                      <div className="track-details">
+                        <div className="track-title">{t}</div>
+                        <div className="track-artist">High-Fidelity Audio</div>
                       </div>
                     </div>
                     {trackToDelete === t ? (
-                      <div style={{ display: 'flex', gap: '8px' }} onClick={(e) => e.stopPropagation()}>
-                        <button 
-                          onClick={() => { onDeleteFromLibrary(t); setTrackToDelete(null); }}
-                          style={{ padding: '8px 12px', borderRadius: '8px', background: '#ff4444', color: 'white', fontWeight: 'bold' }}
-                        >
-                          Confirm
-                        </button>
-                        <button 
-                          onClick={() => setTrackToDelete(null)}
-                          style={{ padding: '8px 12px', borderRadius: '8px', background: 'var(--bg-glass-heavy)', color: 'white' }}
-                        >
-                          Cancel
-                        </button>
+                      <div className="track-actions" onClick={(e) => e.stopPropagation()}>
+                        <button className="btn-confirm-delete" onClick={() => { onDeleteFromLibrary(t); setTrackToDelete(null); }}>Delete</button>
+                        <button className="btn-cancel-delete" onClick={() => setTrackToDelete(null)}>Cancel</button>
                       </div>
                     ) : (
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); setTrackToDelete(t); }}
-                        style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        title="Delete Track"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                      <div className="track-actions">
+                        <button className="btn-delete-icon" onClick={(e) => { e.stopPropagation(); setTrackToDelete(t); }} title="Delete">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     )}
                   </div>
                 ))
@@ -234,19 +224,26 @@ export default function ActiveView({
           </div>
         ) : (
           <div className="library-container">
-            <h3 style={{ fontFamily: 'var(--font-display)', marginBottom: '16px' }}>Cached on your device</h3>
+            <h3 style={{ fontFamily: 'var(--font-display)', marginBottom: '16px', fontSize: '20px', fontWeight: '700' }}>Cached on your device</h3>
             <div className="library-list">
               {libraryTracks.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
+                <div style={{ textAlign: 'center', padding: '48px 16px', color: 'var(--text-muted)' }}>
                   <p>No tracks cached yet.</p>
                 </div>
               ) : (
                 libraryTracks.map((t, index) => (
-                  <div key={t} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px', borderRadius: '16px', background: t === trackName ? 'var(--bg-glass-light)' : 'transparent', border: t === trackName ? '1px solid var(--accent-primary)' : '1px solid transparent' }}>
-                    <div style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>0{index + 1}</div>
-                    <div>
-                      <div style={{ fontWeight: '600', marginBottom: '4px' }}>{t}</div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Available offline</div>
+                  <div key={t} className={`track-row ${t === trackName ? 'active' : ''}`}>
+                    <div className="track-left">
+                      <div className="track-num-container">
+                        <span className="track-num">{index + 1}</span>
+                      </div>
+                      <div className="track-art-placeholder">
+                        <Music size={16} color="var(--text-muted)" />
+                      </div>
+                      <div className="track-details">
+                        <div className="track-title">{t}</div>
+                        <div className="track-artist">Available offline</div>
+                      </div>
                     </div>
                   </div>
                 ))
