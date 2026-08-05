@@ -112,7 +112,7 @@ export default function ActiveView({
       )}
 
       {/* Main View Area (Library) */}
-      <div className="view-header" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', marginBottom: '40px' }}>
+      <div className="view-header">
         <div>
           <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '24px' }}>{isHost ? 'Your Library' : 'Listening Party'}</h2>
         </div>
@@ -145,8 +145,8 @@ export default function ActiveView({
         </div>
 
         {isHost ? (
-          <div style={{ width: '100%', maxWidth: '600px', background: 'var(--bg-glass)', padding: '24px', borderRadius: '24px', border: '1px solid var(--border-glass)', backdropFilter: 'blur(12px)' }}>
-            <div style={{ display: 'flex', gap: '16px', marginBottom: '24px' }}>
+          <div className="library-container">
+            <div className="library-toolbar">
               <button 
                 className="btn-primary" 
                 onClick={() => fileInputRef.current?.click()}
@@ -198,7 +198,7 @@ export default function ActiveView({
             </div>
           </div>
         ) : (
-          <div style={{ width: '100%', maxWidth: '600px', background: 'var(--bg-glass)', padding: '24px', borderRadius: '24px', border: '1px solid var(--border-glass)', backdropFilter: 'blur(12px)' }}>
+          <div className="library-container">
             <h3 style={{ fontFamily: 'var(--font-display)', marginBottom: '16px' }}>Cached on your device</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {libraryTracks.length === 0 ? (
