@@ -48,6 +48,29 @@ export default function SelectionView({ onStartHost, onStartClient, isLoading }:
           </button>
         </form>
       </div>
+
+      <div style={{ marginTop: '64px', maxWidth: '800px', width: '100%', textAlign: 'center' }}>
+        <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '24px', marginBottom: '24px', color: 'var(--text-secondary)' }}>
+          How it Works
+        </h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '24px' }}>
+          <div style={{ background: 'var(--bg-glass-light)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border-glass)' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>⚡️</div>
+            <h4 style={{ fontWeight: '600', marginBottom: '8px' }}>Zero-Lag Sync</h4>
+            <p style={{ fontSize: '14px', color: 'var(--text-muted)' }}>Powered by UDP Multicast and NTP Clock Synchronization for frame-perfect playback.</p>
+          </div>
+          <div style={{ background: 'var(--bg-glass-light)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border-glass)' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🎵</div>
+            <h4 style={{ fontWeight: '600', marginBottom: '8px' }}>High Fidelity</h4>
+            <p style={{ fontSize: '14px', color: 'var(--text-muted)' }}>Streams raw audio via Opus 48kHz encoding, preserving your track's original master quality.</p>
+          </div>
+          <div style={{ background: 'var(--bg-glass-light)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border-glass)' }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🔒</div>
+            <h4 style={{ fontWeight: '600', marginBottom: '8px' }}>Peer-to-Peer</h4>
+            <p style={{ fontSize: '14px', color: 'var(--text-muted)' }}>Music is streamed directly between devices on the same network. No cloud servers required.</p>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }

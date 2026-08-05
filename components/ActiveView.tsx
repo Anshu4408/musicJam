@@ -54,6 +54,7 @@ export default function ActiveView({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showStats, setShowStats] = useState(false);
+  const [trackToDelete, setTrackToDelete] = useState<string | null>(null);
 
   // Refs for high-frequency progress bar updates without React re-renders
   const progressInputRef = useRef<HTMLInputElement>(null);
@@ -96,6 +97,15 @@ export default function ActiveView({
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
+  const stringToHue = (str: string | null) => {
+    if (!str) return 260;
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = str.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return Math.abs(hash % 360);
+  };
+
   return (
     <section className="active-view">
       {/* Mobile Audio Unlock Overlay */}
@@ -130,7 +140,10 @@ export default function ActiveView({
       <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         {/* Massive Now Playing Visual (3D Tilting) */}
         <div className="hero-art-container">
-          <div className={`hero-art ${isPlaying ? '' : 'paused'}`}>
+          <div 
+            className={`hero-art ${isPlaying ? '' : 'paused'}`}
+            style={trackName ? { backgroundImage: `linear-gradient(135deg, hsl(${stringToHue(trackName)}, 80%, 60%), hsl(${(stringToHue(trackName) + 40) % 360}, 80%, 40%))` } : undefined}
+          >
             <div className="hero-art-icon">
               {isPlaying ? '🎧' : '🎵'}
             </div>
@@ -186,12 +199,30 @@ export default function ActiveView({
                         <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>High-Fidelity Audio</div>
                       </div>
                     </div>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); onDeleteFromLibrary(t); }}
-                      style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255,0,0,0.1)', color: '#ff4444' }}
-                    >
-                      ✕
-                    </button>
+                    {trackToDelete === t ? (
+                      <div style={{ display: 'flex', gap: '8px' }} onClick={(e) => e.stopPropagation()}>
+                        <button 
+                          onClick={() => { onDeleteFromLibrary(t); setTrackToDelete(null); }}
+                          style={{ padding: '8px 12px', borderRadius: '8px', background: '#ff4444', color: 'white', fontWeight: 'bold' }}
+                        >
+                          Confirm
+                        </button>
+                        <button 
+                          onClick={() => setTrackToDelete(null)}
+                          style={{ padding: '8px 12px', borderRadius: '8px', background: 'var(--bg-glass-heavy)', color: 'white' }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setTrackToDelete(t); }}
+                        style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        title="Delete Track"
+                      >
+                        🗑️
+                      </button>
+                    )}
                   </div>
                 ))
               )}
@@ -226,8 +257,13 @@ export default function ActiveView({
         <div className="glass-pill">
           <div className="player-main-row">
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <div style={{ fontSize: '24px' }}>
-                {isPlaying ? '🔊' : '🎵'}
+              <div 
+                className="player-art"
+                style={trackName ? { backgroundImage: `linear-gradient(135deg, hsl(${stringToHue(trackName)}, 80%, 60%), hsl(${(stringToHue(trackName) + 40) % 360}, 80%, 40%))` } : undefined}
+              >
+                <span style={{ fontSize: '24px' }}>
+                  {isPlaying ? '🔊' : '🎵'}
+                </span>
               </div>
               <div>
                 <div style={{ fontWeight: '600' }}>{trackName || 'No track selected'}</div>
