@@ -16,51 +16,45 @@ export default function Home() {
   } = useAudioEngine();
 
   return (
-    <div className="app-shell">
-      {/* Ambient background glow */}
-      <div className="orb orb-1" aria-hidden="true" />
-      <div className="orb orb-2" aria-hidden="true" />
+    <>
+      <Header mode={mode} />
 
-      <div className="container">
-        <Header mode={mode} />
+      <main className="main-content">
+        {mode !== 'idle' ? (
+          <ActiveView
+            mode={mode}
+            stats={stats}
+            connectedClients={connectedClients}
+            analyserNode={analyserNode}
+            isLoading={isLoading}
+            roomCode={roomCode}
+            needsGesture={needsGesture}
+            trackName={trackName}
+            downloadProgress={downloadProgress}
+            isPlaying={isPlaying}
+            libraryTracks={libraryTracks}
+            onUploadFile={uploadFile}
+            onLoadFromLibrary={loadFromLibrary}
+            onDeleteFromLibrary={deleteFromLibrary}
+            onBroadcastPlay={broadcastPlay}
+            onBroadcastPause={broadcastPause}
+            onStop={stop}
+            onResumeAudio={resumeAudio}
+          />
+        ) : (
+          <SelectionView
+            onStartHost={startHost}
+            onStartClient={startClient}
+            isLoading={isLoading}
+          />
+        )}
 
-        <main className="main-content">
-          {mode !== 'idle' ? (
-            <ActiveView
-              mode={mode}
-              stats={stats}
-              connectedClients={connectedClients}
-              analyserNode={analyserNode}
-              isLoading={isLoading}
-              roomCode={roomCode}
-              needsGesture={needsGesture}
-              trackName={trackName}
-              downloadProgress={downloadProgress}
-              isPlaying={isPlaying}
-              libraryTracks={libraryTracks}
-              onUploadFile={uploadFile}
-              onLoadFromLibrary={loadFromLibrary}
-              onDeleteFromLibrary={deleteFromLibrary}
-              onBroadcastPlay={broadcastPlay}
-              onBroadcastPause={broadcastPause}
-              onStop={stop}
-              onResumeAudio={resumeAudio}
-            />
-          ) : (
-            <SelectionView
-              onStartHost={startHost}
-              onStartClient={startClient}
-              isLoading={isLoading}
-            />
-          )}
+        {error && <ErrorBanner message={error} />}
+      </main>
 
-          {error && <ErrorBanner message={error} />}
-        </main>
-
-        <footer className="footer" role="contentinfo">
-          WebRTC · Opus 48kHz · PeerJS · Real-time
-        </footer>
-      </div>
-    </div>
+      <footer className="footer" role="contentinfo" style={{ textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
+        MusicJAM · Sonic Ethereal UI · V2
+      </footer>
+    </>
   );
 }

@@ -97,14 +97,14 @@ export default function ActiveView({
   };
 
   return (
-    <section className="premium-active-view">
+    <section className="active-view">
       {/* Mobile Audio Unlock Overlay */}
       {needsGesture && (
         <div className="gesture-overlay">
           <div className="gesture-modal">
             <h2>Playback Paused</h2>
             <p>Tap below to instantly resync audio playback with the host.</p>
-            <button className="btn-accent" onClick={onResumeAudio}>
+            <button className="btn-primary" onClick={onResumeAudio}>
               Resume Sync
             </button>
           </div>
@@ -112,34 +112,43 @@ export default function ActiveView({
       )}
 
       {/* Main View Area (Library) */}
-      <div className="view-header">
+      <div className="view-header" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', marginBottom: '40px' }}>
         <div>
-          <h2 className="session-title">{isHost ? 'Your Library' : 'Listening Party'}</h2>
-          {isHost && (
-            <div className="room-badge">
-              Room Code: <span>{roomCode}</span>
-            </div>
-          )}
+          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '24px' }}>{isHost ? 'Your Library' : 'Listening Party'}</h2>
         </div>
+        {isHost && (
+          <div className="room-details">
+            <div className="room-code-badge">{roomCode}</div>
+            <div className="listeners-badge">
+              <div className="live-dot"></div>
+              {connectedClients} {connectedClients === 1 ? 'Listener' : 'Listeners'}
+            </div>
+          </div>
+        )}
       </div>
 
-      <div className="library-section">
-        {/* Massive Now Playing Visual */}
-        <div className="now-playing-hero">
-          <div className={`hero-art ${isPlaying ? 'playing' : ''}`}>
-            {isPlaying ? '🎧' : '🎵'}
+      <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        {/* Massive Now Playing Visual (3D Tilting) */}
+        <div className="hero-art-container">
+          <div className={`hero-art ${isPlaying ? '' : 'paused'}`}>
+            <div className="hero-art-icon">
+              {isPlaying ? '🎧' : '🎵'}
+            </div>
           </div>
-          <h2 className="hero-title">{trackName || 'No track selected'}</h2>
-          <p className="hero-subtitle">
-             {downloadProgress < 100 && trackName ? `Downloading ${Math.round(downloadProgress)}%` : (trackName ? 'High-Fidelity Sync' : 'Waiting for audio...')}
+        </div>
+
+        <div className="track-info-large">
+          <h2>{trackName || 'No track selected'}</h2>
+          <p>
+             {downloadProgress < 100 && trackName ? `Downloading ${Math.round(downloadProgress)}%` : (trackName ? 'High-Fidelity Audio' : 'Waiting for host...')}
           </p>
         </div>
 
         {isHost ? (
-          <div className="host-library-wrapper">
-            <div className="library-toolbar">
+          <div style={{ width: '100%', maxWidth: '600px', background: 'var(--bg-glass)', padding: '24px', borderRadius: '24px', border: '1px solid var(--border-glass)', backdropFilter: 'blur(12px)' }}>
+            <div style={{ display: 'flex', gap: '16px', marginBottom: '24px' }}>
               <button 
-                className="btn-upload" 
+                className="btn-primary" 
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isLoading}
               >
@@ -152,36 +161,34 @@ export default function ActiveView({
                 style={{ display: 'none' }}
                 ref={fileInputRef}
               />
-              <div className="search-box">
-                <span className="search-icon">🔍</span>
-                <input 
-                  type="text" 
-                  placeholder="Find in library" 
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
+              <input 
+                className="join-input"
+                style={{ padding: '16px', fontSize: '16px', borderRadius: '999px', letterSpacing: 'normal' }}
+                type="text" 
+                placeholder="Find in library" 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
             </div>
 
-            <div className="track-list">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {filteredLibrary.length === 0 ? (
-                <div className="empty-state">
-                  <h3>No tracks found</h3>
-                  <p>Upload audio files to add them to your library.</p>
+                <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
+                  <p>No tracks found. Upload audio files to add them to your library.</p>
                 </div>
               ) : (
                 filteredLibrary.map((t, index) => (
-                  <div key={t} className={`track-item ${t === trackName ? 'active' : ''}`} onClick={() => onLoadFromLibrary(t)}>
-                    <div className="track-number">{index + 1}</div>
-                    <div className="track-info-col">
-                      <div className="track-title">{t}</div>
-                      <div className="track-artist">High-Fidelity Audio</div>
+                  <div key={t} onClick={() => onLoadFromLibrary(t)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderRadius: '16px', background: t === trackName ? 'var(--bg-glass-light)' : 'transparent', border: t === trackName ? '1px solid var(--accent-primary)' : '1px solid transparent', cursor: 'pointer', transition: 'all 0.2s' }}>
+                    <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                      <div style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>0{index + 1}</div>
+                      <div>
+                        <div style={{ fontWeight: '600', marginBottom: '4px' }}>{t}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>High-Fidelity Audio</div>
+                      </div>
                     </div>
-                    {/* Stop event bubbling so clicking delete doesn't trigger load */}
                     <button 
-                      className="btn-delete" 
                       onClick={(e) => { e.stopPropagation(); onDeleteFromLibrary(t); }}
-                      title="Delete from Library"
+                      style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(255,0,0,0.1)', color: '#ff4444' }}
                     >
                       ✕
                     </button>
@@ -191,20 +198,20 @@ export default function ActiveView({
             </div>
           </div>
         ) : (
-          <div className="client-library-wrapper">
-            <h3 className="client-library-title">Cached on your device</h3>
-            <div className="track-list">
+          <div style={{ width: '100%', maxWidth: '600px', background: 'var(--bg-glass)', padding: '24px', borderRadius: '24px', border: '1px solid var(--border-glass)', backdropFilter: 'blur(12px)' }}>
+            <h3 style={{ fontFamily: 'var(--font-display)', marginBottom: '16px' }}>Cached on your device</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {libraryTracks.length === 0 ? (
-                <div className="empty-state">
+                <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
                   <p>No tracks cached yet.</p>
                 </div>
               ) : (
                 libraryTracks.map((t, index) => (
-                  <div key={t} className={`track-item ${t === trackName ? 'active' : ''}`}>
-                    <div className="track-number">{index + 1}</div>
-                    <div className="track-info-col">
-                      <div className="track-title">{t}</div>
-                      <div className="track-artist">Available offline</div>
+                  <div key={t} style={{ display: 'flex', alignItems: 'center', gap: '16px', padding: '16px', borderRadius: '16px', background: t === trackName ? 'var(--bg-glass-light)' : 'transparent', border: t === trackName ? '1px solid var(--accent-primary)' : '1px solid transparent' }}>
+                    <div style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>0{index + 1}</div>
+                    <div>
+                      <div style={{ fontWeight: '600', marginBottom: '4px' }}>{t}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Available offline</div>
                     </div>
                   </div>
                 ))
@@ -216,16 +223,16 @@ export default function ActiveView({
 
       {/* Floating Bottom Player */}
       <div className="bottom-player-wrapper">
-        <div className="glass-pill bottom-player">
+        <div className="glass-pill">
           <div className="player-main-row">
-            <div className="player-now-playing">
-              <div className="player-art">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <div style={{ fontSize: '24px' }}>
                 {isPlaying ? '🔊' : '🎵'}
               </div>
-              <div className="player-track-info">
-                <div className="player-track-title">{trackName || 'No track selected'}</div>
-                <div className="player-track-artist">
-                  {downloadProgress < 100 && trackName ? `Downloading ${Math.round(downloadProgress)}%` : (trackName ? 'High-Fidelity Audio' : '—')}
+              <div>
+                <div style={{ fontWeight: '600' }}>{trackName || 'No track selected'}</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  {downloadProgress < 100 && trackName ? `Downloading ${Math.round(downloadProgress)}%` : (trackName ? 'High-Fidelity Sync' : '—')}
                 </div>
               </div>
             </div>

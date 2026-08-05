@@ -33,7 +33,14 @@ export default function RootLayout({
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0, viewport-fit=cover" />
       </head>
-      <body>{children}</body>
+      <body>
+        <div className="ambient-mesh"></div>
+        <div className="app-shell">
+          <main className="container">
+            {children}
+          </main>
+        </div>
+      </body>
     </html>
   );
 }
