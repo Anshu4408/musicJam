@@ -188,7 +188,7 @@ export default function ActiveView({
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div className="library-list">
               {filteredLibrary.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
                   <p>No tracks found. Upload audio files to add them to your library.</p>
@@ -235,7 +235,7 @@ export default function ActiveView({
         ) : (
           <div className="library-container">
             <h3 style={{ fontFamily: 'var(--font-display)', marginBottom: '16px' }}>Cached on your device</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div className="library-list">
               {libraryTracks.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
                   <p>No tracks cached yet.</p>
