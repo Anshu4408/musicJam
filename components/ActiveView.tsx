@@ -210,80 +210,84 @@ export default function ActiveView({
         )}
       </div>
 
-      {/* Fixed Bottom Player */}
-      <div className="bottom-player">
-        <div className="player-progress-bar-wrapper">
-          {downloadProgress < 100 && trackName ? (
-            <div 
-              className="player-progress-fill" 
-              style={{ width: `${downloadProgress}%`, backgroundColor: 'var(--text-muted)' }} 
-            />
-          ) : (
-            <div className="seek-bar-container">
-              <span className="time-label" ref={progressTimeRef}>0:00</span>
-              <input 
-                ref={progressInputRef}
-                type="range"
-                className="seek-slider"
-                min={0}
-                max={trackDuration || 100}
-                step={0.1}
-                defaultValue={0}
-                onPointerDown={() => { isDraggingRef.current = true; }}
-                onPointerUp={(e) => { 
-                  isDraggingRef.current = false;
-                  if (isHost && trackDuration) {
-                    onBroadcastSeek(parseFloat(e.currentTarget.value));
-                  }
-                }}
-                onChange={(e) => {
-                  if (progressTimeRef.current) {
-                    progressTimeRef.current.innerText = formatTime(parseFloat(e.target.value));
-                  }
-                }}
-                disabled={!isHost || !trackName || downloadProgress < 100}
+      {/* Floating Bottom Player */}
+      <div className="bottom-player-wrapper">
+        <div className="glass-pill bottom-player">
+          <div className="player-main-row">
+            <div className="player-now-playing">
+              <div className="player-art">
+                {isPlaying ? '🔊' : '🎵'}
+              </div>
+              <div className="player-track-info">
+                <div className="player-track-title">{trackName || 'No track selected'}</div>
+                <div className="player-track-artist">
+                  {downloadProgress < 100 && trackName ? `Downloading ${Math.round(downloadProgress)}%` : (trackName ? 'High-Fidelity Audio' : '—')}
+                </div>
+              </div>
+            </div>
+
+            <div className="player-controls">
+              {isHost ? (
+                <button 
+                  className="btn-circle" 
+                  onClick={isPlaying ? onBroadcastPause : onBroadcastPlay}
+                  disabled={!trackName || downloadProgress < 100}
+                >
+                  {isPlaying ? '⏸' : '▶'}
+                </button>
+              ) : (
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+                  {isPlaying ? 'Synced' : 'Waiting'}
+                </div>
+              )}
+            </div>
+
+            <div className="player-right">
+              {/* Info Button for Stats */}
+              <button className="btn-icon-subtle" onClick={() => setShowStats(true)} title="View Diagnostics">
+                ℹ️
+              </button>
+              <button className="btn-icon-subtle" onClick={onStop} title="Leave Room" style={{ marginLeft: '12px', color: '#ff4444' }}>
+                ✕
+              </button>
+            </div>
+          </div>
+
+          <div className="player-progress-bar-wrapper">
+            {downloadProgress < 100 && trackName ? (
+              <div 
+                className="player-progress-fill" 
+                style={{ width: `${downloadProgress}%`, backgroundColor: 'var(--text-muted)' }} 
               />
-              <span className="time-label">{formatTime(trackDuration)}</span>
-            </div>
-          )}
-        </div>
-
-        <div className="player-now-playing">
-          <div className="player-art">
-            {isPlaying ? '🔊' : '🎵'}
+            ) : (
+              <div className="seek-bar-container">
+                <span className="time-label" ref={progressTimeRef}>0:00</span>
+                <input 
+                  ref={progressInputRef}
+                  type="range"
+                  className="seek-slider"
+                  min={0}
+                  max={trackDuration || 100}
+                  step={0.1}
+                  defaultValue={0}
+                  onPointerDown={() => { isDraggingRef.current = true; }}
+                  onPointerUp={(e) => { 
+                    isDraggingRef.current = false;
+                    if (isHost && trackDuration) {
+                      onBroadcastSeek(parseFloat(e.currentTarget.value));
+                    }
+                  }}
+                  onChange={(e) => {
+                    if (progressTimeRef.current) {
+                      progressTimeRef.current.innerText = formatTime(parseFloat(e.target.value));
+                    }
+                  }}
+                  disabled={!isHost || !trackName || downloadProgress < 100}
+                />
+                <span className="time-label">{formatTime(trackDuration)}</span>
+              </div>
+            )}
           </div>
-          <div className="player-track-info">
-            <div className="player-track-title">{trackName || 'No track selected'}</div>
-            <div className="player-track-artist">
-              {downloadProgress < 100 && trackName ? `Downloading ${Math.round(downloadProgress)}%` : (trackName ? 'High-Fidelity Audio' : '—')}
-            </div>
-          </div>
-        </div>
-
-        <div className="player-controls">
-          {isHost ? (
-            <button 
-              className="btn-circle" 
-              onClick={isPlaying ? onBroadcastPause : onBroadcastPlay}
-              disabled={!trackName || downloadProgress < 100}
-            >
-              {isPlaying ? '⏸' : '▶'}
-            </button>
-          ) : (
-            <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-              {isPlaying ? 'Synced' : 'Waiting'}
-            </div>
-          )}
-        </div>
-
-        <div className="player-right">
-          {/* Info Button for Stats */}
-          <button className="btn-icon-subtle" onClick={() => setShowStats(true)} title="View Diagnostics">
-            ℹ️
-          </button>
-          <button className="btn-icon-subtle" onClick={onStop} title="Leave Room" style={{ marginLeft: '12px', color: '#ff4444' }}>
-            ✕
-          </button>
         </div>
       </div>
 
