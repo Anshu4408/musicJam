@@ -176,7 +176,7 @@ export function useAudioEngine() {
         const currentSeek = playbackStartOffsetRef.current + (audioCtxRef.current!.currentTime - playbackStartCtxTimeRef.current);
         const conns = Array.from(clientConnsRef.current.values());
         conns.forEach(c => c.send({ type: 'sync', seekPos: currentSeek, startNtp: performance.now() }));
-      }, 5000);
+      }, 2000);
       return () => clearInterval(id);
     }
   }, [mode, isPlaying]);
@@ -519,9 +519,15 @@ export function useAudioEngine() {
           pingTsRef.current.delete(msg.id);
           const rttMs = performance.now() - sendTime;
           rttMsHistRef.current.push(rttMs);
-          if (rttMsHistRef.current.length > MAX_RTT_HIST) rttMsHistRef.current.shift();
-          const minRtt = Math.min(...rttMsHistRef.current);
-          clockOffsetRef.current = msg.hostTs - sendTime - minRtt / 2;
+          if (rttMsHistRef.current.length > 30) rttMsHistRef.current.shift(); // Increased to 30 for better filtering
+          
+          // Robust NTP Filtering: Use the average of the lowest 25% of RTTs
+          const sortedRtts = [...rttMsHistRef.current].sort((a, b) => a - b);
+          const quartileCount = Math.max(1, Math.floor(sortedRtts.length / 4));
+          const bestRtts = sortedRtts.slice(0, quartileCount);
+          const robustMinRtt = bestRtts.reduce((a, b) => a + b, 0) / bestRtts.length;
+          
+          clockOffsetRef.current = msg.hostTs - sendTime - robustMinRtt / 2;
         } else if (msg?.type === 'welcome') {
           // Handshake protocol
           if (!msg.trackName) return;
@@ -611,14 +617,35 @@ export function useAudioEngine() {
             }
           }
         } else if (msg?.type === 'sync') {
-          if (isPlaying && ctx) {
+          if (isPlaying && ctx && sourceNodeRef.current) {
              const targetWallTime = msg.startNtp - clockOffsetRef.current;
              const delayMs = targetWallTime - performance.now();
              const expectedSeek = msg.seekPos + (delayMs < 0 ? Math.abs(delayMs/1000) : -(delayMs/1000));
              const localSeek = playbackStartOffsetRef.current + (ctx.currentTime - playbackStartCtxTimeRef.current);
              
-             if (Math.abs(localSeek - expectedSeek) > 0.1) {
+             const driftDiff = localSeek - expectedSeek;
+             const driftAbs = Math.abs(driftDiff);
+             
+             if (driftAbs > 0.3) {
+                // Severe drift (>300ms): hard resync
                 startPlaybackAt(msg.startNtp, msg.seekPos);
+             } else if (driftAbs > 0.02) {
+                // Moderate drift (20ms - 300ms): smooth adjustment using playbackRate
+                if (driftDiff > 0) {
+                  sourceNodeRef.current.playbackRate.value = 0.95; // We are ahead, slow down
+                } else {
+                  sourceNodeRef.current.playbackRate.value = 1.05; // We are behind, speed up
+                }
+                
+                // Revert to normal speed after 1 second
+                setTimeout(() => {
+                  if (sourceNodeRef.current) {
+                    sourceNodeRef.current.playbackRate.value = 1.0;
+                  }
+                }, 1000);
+             } else {
+                // Excellent sync (<20ms), ensure normal rate
+                sourceNodeRef.current.playbackRate.value = 1.0;
              }
           }
         }

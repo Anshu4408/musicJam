@@ -67,6 +67,10 @@ export default function ActiveView({
         const pos = getPlaybackPosition();
         progressInputRef.current.value = pos.toString();
         progressTimeRef.current.innerText = formatTime(pos);
+        
+        // Fix for progress bar visual fill
+        const percent = trackDuration ? (pos / trackDuration) * 100 : 0;
+        progressInputRef.current.style.backgroundSize = `${percent}% 100%`;
       }
       rafId = requestAnimationFrame(updateProgressUI);
     };
