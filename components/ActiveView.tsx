@@ -139,7 +139,6 @@ export default function ActiveView({
       </div>
 
       <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      <div style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
         {/* ── SPOTIFY-STYLE TRACK HEADER ── */}
         <div className="active-track-banner" style={{ display: 'flex', alignItems: 'flex-end', gap: '24px', padding: '24px', background: 'linear-gradient(transparent 0%, rgba(0,0,0,0.5) 100%)', borderBottom: '1px solid rgba(255,255,255,0.05)', marginBottom: '24px' }}>
           <div className="banner-art" style={{ width: '120px', height: '120px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
