@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { Zap, Music, Lock } from 'lucide-react';
 
 interface SelectionViewProps {
   onStartHost:   () => void;
@@ -55,17 +56,17 @@ export default function SelectionView({ onStartHost, onStartClient, isLoading }:
         </h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '24px' }}>
           <div style={{ background: 'var(--bg-glass-light)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border-glass)' }}>
-            <div style={{ fontSize: '32px', marginBottom: '12px' }}>⚡️</div>
+            <div style={{ marginBottom: '12px', color: 'var(--accent-primary)', display: 'flex', justifyContent: 'center' }}><Zap size={32} /></div>
             <h4 style={{ fontWeight: '600', marginBottom: '8px' }}>Zero-Lag Sync</h4>
             <p style={{ fontSize: '14px', color: 'var(--text-muted)' }}>Powered by UDP Multicast and NTP Clock Synchronization for frame-perfect playback.</p>
           </div>
           <div style={{ background: 'var(--bg-glass-light)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border-glass)' }}>
-            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🎵</div>
+            <div style={{ marginBottom: '12px', color: 'var(--accent-primary)', display: 'flex', justifyContent: 'center' }}><Music size={32} /></div>
             <h4 style={{ fontWeight: '600', marginBottom: '8px' }}>High Fidelity</h4>
             <p style={{ fontSize: '14px', color: 'var(--text-muted)' }}>Streams raw audio via Opus 48kHz encoding, preserving your track's original master quality.</p>
           </div>
           <div style={{ background: 'var(--bg-glass-light)', padding: '24px', borderRadius: '16px', border: '1px solid var(--border-glass)' }}>
-            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🔒</div>
+            <div style={{ marginBottom: '12px', color: 'var(--accent-primary)', display: 'flex', justifyContent: 'center' }}><Lock size={32} /></div>
             <h4 style={{ fontWeight: '600', marginBottom: '8px' }}>Peer-to-Peer</h4>
             <p style={{ fontSize: '14px', color: 'var(--text-muted)' }}>Music is streamed directly between devices on the same network. No cloud servers required.</p>
           </div>

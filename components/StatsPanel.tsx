@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { X } from 'lucide-react';
 import { AppMode, EngineStats } from '@/hooks/useAudioEngine';
 
 interface StatsPanelProps {
@@ -17,7 +18,7 @@ export default function StatsPanel({ stats, mode, connectedClients, onClose }: S
       <div className="stats-modal" onClick={e => e.stopPropagation()}>
         <div className="stats-header">
           <h3>Diagnostics</h3>
-          <button className="btn-icon-subtle" onClick={onClose}>✕</button>
+          <button className="btn-icon-subtle" onClick={onClose}><X size={20} /></button>
         </div>
         
         <div className="stats-grid">

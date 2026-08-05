@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useMemo } from 'react';
+import { Search, Headphones, Music, Volume2, Pause, Play, Info, X, Trash2 } from 'lucide-react';
 import StatsPanel from './StatsPanel';
 import { AppMode, EngineStats } from '@/hooks/useAudioEngine';
 
@@ -144,8 +145,8 @@ export default function ActiveView({
             className={`hero-art ${isPlaying ? '' : 'paused'}`}
             style={trackName ? { backgroundImage: `linear-gradient(135deg, hsl(${stringToHue(trackName)}, 80%, 60%), hsl(${(stringToHue(trackName) + 40) % 360}, 80%, 40%))` } : undefined}
           >
-            <div className="hero-art-icon">
-              {isPlaying ? '🎧' : '🎵'}
+            <div className="hero-art-icon" style={{ color: 'white', opacity: 0.9 }}>
+              {isPlaying ? <Headphones size={64} /> : <Music size={64} />}
             </div>
           </div>
         </div>
@@ -174,14 +175,17 @@ export default function ActiveView({
                 style={{ display: 'none' }}
                 ref={fileInputRef}
               />
-              <input 
-                className="join-input"
-                style={{ padding: '16px', fontSize: '16px', borderRadius: '999px', letterSpacing: 'normal' }}
-                type="text" 
-                placeholder="Find in library" 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+              <div className="search-box">
+                <span className="search-icon"><Search size={18} /></span>
+                <input 
+                  className="join-input"
+                  style={{ padding: '16px', fontSize: '16px', borderRadius: '999px', letterSpacing: 'normal', paddingLeft: '48px', width: '100%' }}
+                  type="text" 
+                  placeholder="Find in library" 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -220,7 +224,7 @@ export default function ActiveView({
                         style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                         title="Delete Track"
                       >
-                        🗑️
+                        <Trash2 size={18} />
                       </button>
                     )}
                   </div>
@@ -261,8 +265,8 @@ export default function ActiveView({
                 className="player-art"
                 style={trackName ? { backgroundImage: `linear-gradient(135deg, hsl(${stringToHue(trackName)}, 80%, 60%), hsl(${(stringToHue(trackName) + 40) % 360}, 80%, 40%))` } : undefined}
               >
-                <span style={{ fontSize: '24px' }}>
-                  {isPlaying ? '🔊' : '🎵'}
+                <span style={{ display: 'flex', alignItems: 'center', color: 'white' }}>
+                  {isPlaying ? <Volume2 size={24} /> : <Music size={24} />}
                 </span>
               </div>
               <div>
@@ -280,7 +284,7 @@ export default function ActiveView({
                   onClick={isPlaying ? onBroadcastPause : onBroadcastPlay}
                   disabled={!trackName || downloadProgress < 100}
                 >
-                  {isPlaying ? '⏸' : '▶'}
+                  {isPlaying ? <Pause size={24} /> : <Play size={24} />}
                 </button>
               ) : (
                 <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
@@ -292,10 +296,10 @@ export default function ActiveView({
             <div className="player-right">
               {/* Info Button for Stats */}
               <button className="btn-icon-subtle" onClick={() => setShowStats(true)} title="View Diagnostics">
-                ℹ️
+                <Info size={20} />
               </button>
               <button className="btn-icon-subtle" onClick={onStop} title="Leave Room" style={{ marginLeft: '12px', color: '#ff4444' }}>
-                ✕
+                <X size={20} />
               </button>
             </div>
           </div>
