@@ -13,6 +13,7 @@ export default function Home() {
     roomCode, needsGesture, trackName, downloadProgress, isPlaying, libraryTracks,
     uploadFile, loadFromLibrary, deleteFromLibrary, broadcastPlay, broadcastPause,
     startHost, startClient, stop, resumeAudio,
+    broadcastSeek, getPlaybackPosition, trackDuration
   } = useAudioEngine();
 
   return (
@@ -30,6 +31,8 @@ export default function Home() {
             roomCode={roomCode}
             needsGesture={needsGesture}
             trackName={trackName}
+            trackDuration={trackDuration}
+            getPlaybackPosition={getPlaybackPosition}
             downloadProgress={downloadProgress}
             isPlaying={isPlaying}
             libraryTracks={libraryTracks}
@@ -38,6 +41,7 @@ export default function Home() {
             onDeleteFromLibrary={deleteFromLibrary}
             onBroadcastPlay={broadcastPlay}
             onBroadcastPause={broadcastPause}
+            onBroadcastSeek={broadcastSeek}
             onStop={stop}
             onResumeAudio={resumeAudio}
           />
