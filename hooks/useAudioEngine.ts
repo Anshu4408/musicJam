@@ -196,7 +196,8 @@ export function useAudioEngine() {
   useEffect(() => {
     if (mode === 'host' && isPlaying && audioCtxRef.current) {
       const id = setInterval(() => {
-        const currentSeek = playbackStartOffsetRef.current + (audioCtxRef.current!.currentTime - playbackStartCtxTimeRef.current);
+        const hardwareLatency = (audioCtxRef.current!.outputLatency || audioCtxRef.current!.baseLatency || 0.02);
+        const currentSeek = playbackStartOffsetRef.current + (audioCtxRef.current!.currentTime - playbackStartCtxTimeRef.current) - hardwareLatency;
         const conns = Array.from(clientConnsRef.current.values());
         conns.forEach(c => c.send({ type: 'sync', seekPos: currentSeek, startNtp: performance.now() }));
       }, 2000);
@@ -216,7 +217,7 @@ export function useAudioEngine() {
 
     const localWallTime = performance.now();
     const targetWallTime = ntpTime - clockOffsetRef.current;
-    const delayMs = targetWallTime - localWallTime;
+    const delaySec = (targetWallTime - localWallTime) / 1000;
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;
@@ -229,13 +230,16 @@ export function useAudioEngine() {
     source.connect(masterGain);
     masterGain.connect(ctx.destination);
     
+    // Hardware Latency Compensation: 
+    // offset the playback so the sound physically exits the speaker exactly at targetWallTime
+    const hardwareLatency = (ctx.outputLatency || ctx.baseLatency || 0.02);
+    let startCtxTime = ctx.currentTime + delaySec - hardwareLatency;
     let actualSeek = seekPos;
-    let startCtxTime = ctx.currentTime;
     
-    if (delayMs > 0) {
-      startCtxTime += (delayMs / 1000);
-    } else {
-      actualSeek += Math.abs(delayMs / 1000);
+    if (startCtxTime < ctx.currentTime) {
+      // We missed the ideal scheduling window, so start immediately and seek forward to catch up
+      actualSeek += (ctx.currentTime - startCtxTime);
+      startCtxTime = ctx.currentTime;
     }
 
     playbackStartCtxTimeRef.current = startCtxTime;
@@ -654,11 +658,14 @@ export function useAudioEngine() {
         } else if (msg?.type === 'sync') {
           if (isPlaying && ctx && sourceNodeRef.current) {
              const targetWallTime = msg.startNtp - clockOffsetRef.current;
-             const delayMs = targetWallTime - performance.now();
-             const expectedSeek = msg.seekPos + (delayMs < 0 ? Math.abs(delayMs/1000) : -(delayMs/1000));
-             const localSeek = playbackStartOffsetRef.current + (ctx.currentTime - playbackStartCtxTimeRef.current);
+             const delaySec = (targetWallTime - performance.now()) / 1000;
+             const expectedPhysicalSeek = msg.seekPos - delaySec; 
              
-             const driftDiff = localSeek - expectedSeek;
+             const hardwareLatency = (ctx.outputLatency || ctx.baseLatency || 0.02);
+             const timeRunning = ctx.currentTime - playbackStartCtxTimeRef.current;
+             const localPhysicalSeek = playbackStartOffsetRef.current + timeRunning - hardwareLatency;
+             
+             const driftDiff = localPhysicalSeek - expectedPhysicalSeek;
              const driftAbs = Math.abs(driftDiff);
              
              if (driftAbs > 0.5) {
