@@ -198,8 +198,13 @@ export function useAudioEngine() {
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     
+    // Add a master GainNode to boost output for mobile devices
+    const masterGain = ctx.createGain();
+    masterGain.gain.value = 1.5; // +50% volume boost to combat low mobile sound
+    
     if (analyserNode) source.connect(analyserNode);
-    source.connect(ctx.destination);
+    source.connect(masterGain);
+    masterGain.connect(ctx.destination);
     
     let actualSeek = seekPos;
     let startCtxTime = ctx.currentTime;
@@ -626,25 +631,20 @@ export function useAudioEngine() {
              const driftDiff = localSeek - expectedSeek;
              const driftAbs = Math.abs(driftDiff);
              
-             if (driftAbs > 0.3) {
-                // Severe drift (>300ms): hard resync
+             if (driftAbs > 0.5) {
+                // Severe drift (>500ms): hard resync
                 startPlaybackAt(msg.startNtp, msg.seekPos);
-             } else if (driftAbs > 0.02) {
-                // Moderate drift (20ms - 300ms): smooth adjustment using playbackRate
-                if (driftDiff > 0) {
-                  sourceNodeRef.current.playbackRate.value = 0.95; // We are ahead, slow down
-                } else {
-                  sourceNodeRef.current.playbackRate.value = 1.05; // We are behind, speed up
-                }
+             } else if (driftAbs > 0.01) {
+                // Smooth proportional adjustment (P-controller)
+                // If drift is +50ms (0.05s), we are ahead. We want to slow down.
+                // To correct 50ms of drift over 2 seconds, we run at 97.5% speed (1.0 - 0.05/2).
+                let rate = 1.0 - (driftDiff / 2.0);
                 
-                // Revert to normal speed after 1 second
-                setTimeout(() => {
-                  if (sourceNodeRef.current) {
-                    sourceNodeRef.current.playbackRate.value = 1.0;
-                  }
-                }, 1000);
+                // Clamp the adjustment to prevent chipmunk/robotic effects (max +/- 10%)
+                rate = Math.max(0.9, Math.min(1.1, rate)); 
+                sourceNodeRef.current.playbackRate.value = rate;
              } else {
-                // Excellent sync (<20ms), ensure normal rate
+                // Excellent sync (<10ms), ensure normal rate
                 sourceNodeRef.current.playbackRate.value = 1.0;
              }
           }
