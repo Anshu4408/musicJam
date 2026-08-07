@@ -123,6 +123,13 @@ button {
   will-change: transform, box-shadow;
 }
 
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
+
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-secondary);
   transform: scale(1.04);

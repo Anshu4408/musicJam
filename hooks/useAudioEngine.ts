@@ -94,6 +94,7 @@ export function useAudioEngine() {
   
   const statsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ntpIntervalRef   = useRef<ReturnType<typeof setInterval> | null>(null);
+  const onTrackEndedCallbackRef = useRef<(() => void) | null>(null);
 
   const clientConnsRef = useRef<Map<string, any>>(new Map());
 
@@ -169,6 +170,28 @@ export function useAudioEngine() {
 
   // ── PLAYBACK LOGIC (Shared) ────────────────────────────────────────────────
 
+  // Auto-Forward Logic
+  useEffect(() => {
+    onTrackEndedCallbackRef.current = () => {
+      if (mode !== 'host') return;
+      
+      const currentTrack = trackNameRef.current;
+      if (!currentTrack || libraryTracks.length === 0) return;
+      
+      const idx = libraryTracks.indexOf(currentTrack);
+      if (idx === -1) return;
+      
+      const nextIdx = (idx + 1) % libraryTracks.length;
+      const nextTrack = libraryTracks[nextIdx];
+      
+      // Auto-load and play the next track
+      loadFromLibrary(nextTrack).then(() => {
+        // Broadcast play after a tiny delay to ensure clients processed the new track's 'welcome' packet
+        setTimeout(() => broadcastPlay(), 100);
+      });
+    };
+  }, [mode, libraryTracks, loadFromLibrary, broadcastPlay]);
+
   // Host sync heartbeat
   useEffect(() => {
     if (mode === 'host' && isPlaying && audioCtxRef.current) {
@@ -217,6 +240,13 @@ export function useAudioEngine() {
 
     playbackStartCtxTimeRef.current = startCtxTime;
     playbackStartOffsetRef.current  = actualSeek;
+
+    source.onended = () => {
+      // If isPlayingRef.current is still true, the track ended naturally (we didn't manually call stopPlayback)
+      if (isPlayingRef.current && onTrackEndedCallbackRef.current) {
+        onTrackEndedCallbackRef.current();
+      }
+    };
 
     source.start(startCtxTime, actualSeek);
     sourceNodeRef.current = source;

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Zap, Music, Lock } from 'lucide-react';
+import { Zap, Music, Lock, Loader2 } from 'lucide-react';
 
 interface SelectionViewProps {
   onStartHost:   () => void;
@@ -21,7 +21,10 @@ export default function SelectionView({ onStartHost, onStartClient, isLoading }:
         <div className="action-card" onClick={isLoading ? undefined : onStartHost}>
           <h3>Host a Party</h3>
           <p>Create a room and stream your library in perfect sync.</p>
-          <button className="btn-primary" disabled={isLoading}>Start Hosting</button>
+          <button className="btn-primary" disabled={isLoading} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {isLoading && <Loader2 size={18} className="spin" />}
+            {isLoading ? 'Starting...' : 'Start Hosting'}
+          </button>
         </div>
 
         <form className="action-card" onSubmit={(e) => {
@@ -42,10 +45,11 @@ export default function SelectionView({ onStartHost, onStartClient, isLoading }:
           <button 
             type="submit"
             className="btn-primary" 
-            style={{ width: '100%', marginTop: '16px' }}
+            style={{ width: '100%', marginTop: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
             disabled={isLoading || code.length !== 6}
           >
-            Join Now
+            {isLoading && <Loader2 size={18} className="spin" />}
+            {isLoading ? 'Joining...' : 'Join Now'}
           </button>
         </form>
       </div>
