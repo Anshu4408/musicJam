@@ -196,8 +196,7 @@ export function useAudioEngine() {
   useEffect(() => {
     if (mode === 'host' && isPlaying && audioCtxRef.current) {
       const id = setInterval(() => {
-        const hardwareLatency = (audioCtxRef.current!.outputLatency || audioCtxRef.current!.baseLatency || 0.02);
-        const currentSeek = playbackStartOffsetRef.current + (audioCtxRef.current!.currentTime - playbackStartCtxTimeRef.current) - hardwareLatency;
+        const currentSeek = playbackStartOffsetRef.current + (audioCtxRef.current!.currentTime - playbackStartCtxTimeRef.current);
         const conns = Array.from(clientConnsRef.current.values());
         conns.forEach(c => c.send({ type: 'sync', seekPos: currentSeek, startNtp: performance.now() }));
       }, 2000);
@@ -230,16 +229,13 @@ export function useAudioEngine() {
     source.connect(masterGain);
     masterGain.connect(ctx.destination);
     
-    // Hardware Latency Compensation: 
-    // offset the playback so the sound physically exits the speaker exactly at targetWallTime
-    const hardwareLatency = (ctx.outputLatency || ctx.baseLatency || 0.02);
-    let startCtxTime = ctx.currentTime + delaySec - hardwareLatency;
     let actualSeek = seekPos;
+    let startCtxTime = ctx.currentTime;
     
-    if (startCtxTime < ctx.currentTime) {
-      // We missed the ideal scheduling window, so start immediately and seek forward to catch up
-      actualSeek += (ctx.currentTime - startCtxTime);
-      startCtxTime = ctx.currentTime;
+    if (delaySec > 0) {
+      startCtxTime += delaySec;
+    } else {
+      actualSeek += Math.abs(delaySec);
     }
 
     playbackStartCtxTimeRef.current = startCtxTime;
@@ -659,13 +655,11 @@ export function useAudioEngine() {
           if (isPlaying && ctx && sourceNodeRef.current) {
              const targetWallTime = msg.startNtp - clockOffsetRef.current;
              const delaySec = (targetWallTime - performance.now()) / 1000;
-             const expectedPhysicalSeek = msg.seekPos - delaySec; 
+             const expectedSeek = msg.seekPos - delaySec; 
              
-             const hardwareLatency = (ctx.outputLatency || ctx.baseLatency || 0.02);
-             const timeRunning = ctx.currentTime - playbackStartCtxTimeRef.current;
-             const localPhysicalSeek = playbackStartOffsetRef.current + timeRunning - hardwareLatency;
+             const localSeek = playbackStartOffsetRef.current + (ctx.currentTime - playbackStartCtxTimeRef.current);
              
-             const driftDiff = localPhysicalSeek - expectedPhysicalSeek;
+             const driftDiff = localSeek - expectedSeek;
              const driftAbs = Math.abs(driftDiff);
              
              if (driftAbs > 0.5) {
